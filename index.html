@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MintShelf — Turn Your Shelf into a Shareable Store</title>
+    <meta name="description" content="Turn Your Shelf into a Shareable Store — Instant catalogues, counter QR ordering, franchise teams, and online storefronts." />
+    <meta property="og:title" content="MintShelf — Turn Your Shelf into a Shareable Store" />
+    <meta property="og:description" content="Turn Your Shelf into a Shareable Store — Instant catalogues, counter QR ordering, franchise teams, and online storefronts." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Inter+Tight:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --color-bg: #F5F8EF;
+        --color-forest: #08482D;
+        --color-mint: #DAE7C7;
+        --color-ink: #101410;
+        --color-muted: #5E5E61;
+        --color-white: #FFFFFF;
+        --font-headline: 'Inter Tight', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-hand: 'Caveat', cursive;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background-color: var(--color-bg);
+        color: var(--color-ink);
+        font-family: var(--font-ui);
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+      a { color: inherit; text-decoration: none; }
+      button { font-family: inherit; cursor: pointer; border: none; }
+      :focus-visible {
+        outline: 2px solid var(--color-forest);
+        outline-offset: 2px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, ::before, ::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

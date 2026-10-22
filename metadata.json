@@ -1,0 +1,6 @@
+{
+  "name": "MintShelf",
+  "description": "Turn Your Shelf into a Shareable Store — Instant catalogues, counter QR ordering, franchise teams, and online storefronts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

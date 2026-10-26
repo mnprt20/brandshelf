@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Connection testing doc
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Stores collection (public catalogues and store configs)
+    match /stores/{storeId} {
+      allow get: if isValidId(storeId);
+      allow list: if true;
+      allow create: if isValidId(storeId);
+      allow update: if isValidId(storeId);
+      allow delete: if false;
+
+      // Categories subcollection
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow create, update: if isValidId(categoryId);
+        allow delete: if isValidId(categoryId);
+      }
+
+      // Products subcollection
+      match /products/{productId} {
+        allow read: if true;
+        allow create, update: if isValidId(productId);
+        allow delete: if isValidId(productId);
+      }
+
+      // Orders subcollection
+      match /orders/{orderId} {
+        allow read: if true;
+        allow create: if isValidId(orderId);
+        allow update: if isValidId(orderId);
+        allow delete: if false;
+
+        match /events/{eventId} {
+          allow read: if true;
+          allow create, update: if isValidId(eventId);
+          allow delete: if false;
+        }
+      }
+    }
+
+    // Merchant Users
+    match /users/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create, update: if isValidId(userId);
+      allow delete: if false;
+    }
+
+    // Store Memberships
+    match /memberships/{membershipId} {
+      allow get: if isValidId(membershipId);
+      allow list: if true;
+      allow create, update: if isValidId(membershipId);
+      allow delete: if isValidId(membershipId);
+    }
+
+    // Customer accounts
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId);
+      allow list: if true;
+      allow create, update: if isValidId(customerId);
+      allow delete: if false;
+
+      // Saved delivery addresses
+      match /addresses/{addressId} {
+        allow read: if isValidId(customerId);
+        allow write: if isValidId(customerId) && isValidId(addressId);
+      }
+    }
+  }
+}

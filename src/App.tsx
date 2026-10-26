@@ -9,10 +9,12 @@ import { defaultRepository } from "./repository/storage";
 import { seedDemoData } from "./services/seedData";
 import { AuthService } from "./services/authService";
 import { CustomerService } from "./services/customerService";
+import { testConnection } from "./services/firebase";
 
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
+import { FranchiseSignupPage } from "./pages/FranchiseSignupPage";
 import { ThemesGalleryPage } from "./pages/ThemesGalleryPage";
 import { ThemePreviewPage } from "./pages/ThemePreviewPage";
 import { StorefrontPage } from "./pages/StorefrontPage";
@@ -55,10 +57,19 @@ export default function App() {
 
   const [initialized, setInitialized] = useState(false);
 
-  // Initialize seed demo data on first load
+  // Initialize seed demo data on first load and verify Firestore connection
   useEffect(() => {
     const init = async () => {
-      await seedDemoData(defaultRepository);
+      try {
+        await testConnection();
+      } catch (e) {
+        console.warn("Firestore connection check:", e);
+      }
+      try {
+        await seedDemoData(defaultRepository);
+      } catch (e) {
+        console.warn("Demo data initialization notice:", e);
+      }
       setInitialized(true);
     };
     init();
@@ -159,7 +170,13 @@ export default function App() {
   if (segments[0] === "login") {
     return <LoginPage onNavigate={navigateTo} onLoginSuccess={handleLoginSuccess} />;
   }
+  if (segments[0] === "franchise-signup" || segments[0] === "signup-franchise") {
+    return <FranchiseSignupPage onNavigate={navigateTo} onLoginSuccess={handleLoginSuccess} />;
+  }
   if (segments[0] === "signup") {
+    if (queryParams.get("plan") === "franchise") {
+      return <FranchiseSignupPage onNavigate={navigateTo} onLoginSuccess={handleLoginSuccess} />;
+    }
     return <SignupPage onNavigate={navigateTo} onLoginSuccess={handleLoginSuccess} />;
   }
 

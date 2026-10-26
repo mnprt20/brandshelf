@@ -11,7 +11,9 @@ export const BoldTheme: React.FC<ThemeSharedProps> = ({
   cartCount,
   onOpenCart,
   onAddToCart,
-  isDemo
+  isDemo,
+  onOpenOrderHistory,
+  orderCount
 }) => {
   const filtered = activeCategoryId
     ? products.filter(p => p.categoryId === activeCategoryId && (isDemo || p.isAvailable))
@@ -20,18 +22,33 @@ export const BoldTheme: React.FC<ThemeSharedProps> = ({
   return (
     <div style={{ backgroundColor: "#0C120C", minHeight: "100vh", color: "#F7FBF6", fontFamily: "sans-serif" }}>
       {/* High Contrast Banner */}
-      <header style={{ padding: "32px 24px", background: store.brandColor, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <header style={{ padding: "32px 24px", background: store.brandColor, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
         <div>
           <span style={{ textTransform: "uppercase", letterSpacing: "2px", fontSize: "12px", fontWeight: 700, color: "#DAE7C7" }}>Featured Storefront</span>
           <h1 style={{ fontSize: "36px", fontWeight: 900, margin: "4px 0 0", color: "#FFFFFF" }}>{store.name}</h1>
           <p style={{ fontSize: "14px", color: "#F0F5EC", margin: "4px 0 0" }}>{store.description}</p>
         </div>
-        <button
-          onClick={onOpenCart}
-          style={{ background: "#FFFFFF", color: store.brandColor, padding: "14px 24px", borderRadius: "9999px", fontWeight: 800, fontSize: "15px", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}
-        >
-          CART ({cartCount})
-        </button>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          {onOpenOrderHistory && (
+            <button
+              onClick={onOpenOrderHistory}
+              style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#FFFFFF", padding: "12px 20px", borderRadius: "9999px", fontWeight: 800, fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+            >
+              <span>ORDERS</span>
+              {typeof orderCount === "number" && orderCount > 0 && (
+                <span style={{ background: "#DAE7C7", color: "#0C120C", padding: "1px 6px", borderRadius: "9999px", fontSize: "11px", fontWeight: 900 }}>
+                  {orderCount}
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            onClick={onOpenCart}
+            style={{ background: "#FFFFFF", color: store.brandColor, padding: "14px 24px", borderRadius: "9999px", fontWeight: 800, fontSize: "15px", boxShadow: "0 4px 12px rgba(0,0,0,0.2)", border: "none", cursor: "pointer" }}
+          >
+            CART ({cartCount})
+          </button>
+        </div>
       </header>
 
       {/* Category Buttons */}

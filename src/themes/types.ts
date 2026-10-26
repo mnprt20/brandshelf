@@ -21,4 +21,6 @@ export interface ThemeSharedProps {
   onOpenCart: () => void;
   onAddToCart: (product: Product) => void;
   isDemo?: boolean;
+  onOpenOrderHistory?: () => void;
+  orderCount?: number;
 }

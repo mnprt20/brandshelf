@@ -471,5 +471,90 @@ export async function runAllDiagnostics(): Promise<TestResult[]> {
     results.push({ name: "Assistant write tool confirmation gate", passed: false, message: err.message });
   }
 
+  // TEST 17: Franchise signup with auto-generated owner ID and franchise plan
+  try {
+    const { user: fUser1, store: fStore1 } = await auth.signupFranchise("Blue Cafe", "Ravi Owner", "pass123");
+    const { user: fUser2, store: fStore2 } = await auth.signupFranchise("Blue Cafe", "Second Owner", "pass123");
+
+    const owner1IdValid = fUser1.username === "blue-cafe-owner";
+    const owner2IdValid = fUser2.username === "blue-cafe-owner-2";
+    const store1PlanValid = fStore1.planSlug === "franchise";
+    const store2PlanValid = fStore2.planSlug === "franchise";
+
+    results.push({
+      name: "Franchise signup and generated owner ID",
+      passed: owner1IdValid && owner2IdValid && store1PlanValid && store2PlanValid
+    });
+  } catch (err: any) {
+    results.push({ name: "Franchise signup and generated owner ID", passed: false, message: err.message });
+  }
+
+  // TEST 18: Staff ID generation, edit, password reset, and sales visibility
+  try {
+    const { user: fOwner, store: fStore } = await auth.signupFranchise("Green Garden", "Gardener", "ownerpass");
+    const fSession = { userId: fOwner.id, storeId: fStore.id, role: "owner" as const };
+
+    // 1. Generate staff username
+    const staffIdRavi = await auth.generateStaffUsername(fStore.name, "Ravi");
+    const staffIdRaviAgain = await auth.generateStaffUsername(fStore.name, "Ravi");
+    const idGen1Valid = staffIdRavi === "green-garden-ravi";
+
+    // 2. Add staff user
+    const staffRavi = await auth.addStaff(fSession, {
+      username: staffIdRavi,
+      displayName: "Ravi Kumar",
+      password: "initialpass"
+    });
+
+    // 3. Edit staff
+    const updatedStaff = await auth.updateStaff(fSession, staffRavi.id, {
+      displayName: "Ravi Senior",
+      username: "green-garden-ravi-sr"
+    });
+    const editValid = updatedStaff.displayName === "Ravi Senior" && updatedStaff.username === "green-garden-ravi-sr";
+
+    // 4. Reset password and verify login
+    await auth.resetStaffPassword(fSession, staffRavi.id, "newsecretpass");
+    const loginWithNew = await auth.login("green-garden-ravi-sr", "newsecretpass");
+    const resetValid = loginWithNew.user.id === staffRavi.id;
+
+    // 5. Create product and order attributed to this staff member
+    const cat = await catalog.saveCategory(fSession, "Plants");
+    const prod = await catalog.saveProduct(fSession, {
+      categoryId: cat.id,
+      name: "Fern",
+      description: "Green",
+      pricePaise: 45000,
+      stock: 10,
+      isAvailable: true
+    });
+
+    const memRavi = await repo.getMembershipByUserAndStore(staffRavi.id, fStore.id);
+    const orderRavi = await order.createQrOrder(fStore.id, {
+      customerName: "Plant Lover",
+      customerPhone: "999888777",
+      referralCode: memRavi?.referralCode,
+      items: [{ productId: prod.id, quantity: 2 }]
+    });
+
+    // 6. Owner can see every staff member's orders and sales
+    const ownerSeenOrders = await order.listOrders(fSession, staffRavi.id);
+    const seenOrderValid = ownerSeenOrders.length === 1 && ownerSeenOrders[0].id === orderRavi.id;
+    const staffSession = { userId: staffRavi.id, storeId: fStore.id, role: "staff" as const };
+    const staffSeenOrders = await order.listOrders(staffSession);
+    const staffIsolationValid = staffSeenOrders.length === 1 && staffSeenOrders[0].id === orderRavi.id;
+
+    results.push({
+      name: "Staff generated ID, edit, reset password, and orders visibility",
+      passed: idGen1Valid && editValid && resetValid && seenOrderValid && staffIsolationValid
+    });
+  } catch (err: any) {
+    results.push({
+      name: "Staff generated ID, edit, reset password, and orders visibility",
+      passed: false,
+      message: err.message
+    });
+  }
+
   return results;
 }

@@ -1,5 +1,5 @@
 import { IRepository } from "../repository/types";
-import { Order, OrderStatus, SessionContext, OrderItemSnapshot } from "../types";
+import { Order, OrderStatus, SessionContext, OrderItemSnapshot, StatusEvent } from "../types";
 
 export class OrderService {
   constructor(private repo: IRepository) {}
@@ -304,5 +304,28 @@ export class OrderService {
     });
 
     return order;
+  }
+
+  async getCustomerOrders(storeId: string, filter: {
+    customerId?: string | null;
+    phone?: string;
+    orderNumbers?: string[];
+  }): Promise<Order[]> {
+    const orders = await this.repo.getOrders(storeId);
+    const cleanPhone = filter.phone?.trim();
+    const numbersSet = filter.orderNumbers && filter.orderNumbers.length > 0
+      ? new Set(filter.orderNumbers.map(n => n.toUpperCase().trim()))
+      : null;
+
+    return orders.filter(o => {
+      if (filter.customerId && o.customerId === filter.customerId) return true;
+      if (cleanPhone && o.customerPhone && o.customerPhone.trim() === cleanPhone) return true;
+      if (numbersSet && numbersSet.has(o.number.toUpperCase().trim())) return true;
+      return false;
+    }).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async getOrderStatusEvents(orderId: string): Promise<StatusEvent[]> {
+    return this.repo.getStatusEvents(orderId);
   }
 }

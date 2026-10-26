@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Store, Category, Product, Order, Customer, CustomerAddress, CustomerSessionContext } from "../types";
 import { defaultRepository } from "../repository/storage";
 import { OrderService } from "../services/orderService";
@@ -9,6 +9,7 @@ import { MinimalTheme } from "../themes/minimal";
 import { BoldTheme } from "../themes/bold";
 import { formatPaise } from "../utils/money";
 import { generateQrSvg } from "../utils/qr";
+import { OrderHistory } from "../components/OrderHistory";
 
 interface Props {
   slug: string;
@@ -43,6 +44,10 @@ export const StorefrontPage: React.FC<Props> = ({
   // Cart & Drawer
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  // Order History state
+  const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
+  const [orderCount, setOrderCount] = useState(0);
 
   // Counter Checkout state (Offline / Franchise)
   const [counterName, setCounterName] = useState("");
@@ -80,6 +85,33 @@ export const StorefrontPage: React.FC<Props> = ({
   const orderService = new OrderService(defaultRepository);
   const customerService = new CustomerService(defaultRepository);
 
+  const recordOrderNumber = useCallback((storeId: string, orderNum: string) => {
+    try {
+      const key = `mintshelf_recent_orders_${storeId}`;
+      const raw = localStorage.getItem(key);
+      const list: string[] = raw ? JSON.parse(raw) : [];
+      if (!list.includes(orderNum)) {
+        list.unshift(orderNum);
+        localStorage.setItem(key, JSON.stringify(list.slice(0, 50)));
+      }
+      setOrderCount(prev => prev + 1);
+    } catch {}
+  }, []);
+
+  const refreshOrderCount = useCallback(async (storeId: string) => {
+    try {
+      const key = `mintshelf_recent_orders_${storeId}`;
+      const raw = localStorage.getItem(key);
+      const recent: string[] = raw ? JSON.parse(raw) : [];
+      const myOrders = await orderService.getCustomerOrders(storeId, {
+        customerId: customerSession?.customerId,
+        phone: customerSession?.phone,
+        orderNumbers: recent
+      });
+      setOrderCount(myOrders.length);
+    } catch {}
+  }, [customerSession]);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -103,12 +135,13 @@ export const StorefrontPage: React.FC<Props> = ({
         setTrackedOrder(ord);
       }
 
+      await refreshOrderCount(s.id);
       setLoading(false);
     };
     load();
-  }, [slug, orderNumber]);
+  }, [slug, orderNumber, refreshOrderCount]);
 
-  // Load customer addresses if logged in
+  // Load customer addresses if logged in & refresh order count
   useEffect(() => {
     if (customerSession && store) {
       const loadAddresses = async () => {
@@ -118,8 +151,9 @@ export const StorefrontPage: React.FC<Props> = ({
         if (def) setSelectedAddressId(def.id);
       };
       loadAddresses();
+      refreshOrderCount(store.id);
     }
-  }, [customerSession, store]);
+  }, [customerSession, store, refreshOrderCount]);
 
   if (loading) {
     return (
@@ -334,6 +368,7 @@ export const StorefrontPage: React.FC<Props> = ({
         referralCode: referralCode,
         items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
       });
+      recordOrderNumber(store.id, ord.number);
       setCompletedOrder(ord);
       setCart([]);
     } catch (err: any) {
@@ -361,6 +396,7 @@ export const StorefrontPage: React.FC<Props> = ({
         referralCode: referralCode,
         items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
       });
+      recordOrderNumber(store.id, ord.number);
       setCart([]);
       setIsCartOpen(false);
       onNavigate(`#/store/${slug}/order/${ord.number}`);
@@ -369,6 +405,25 @@ export const StorefrontPage: React.FC<Props> = ({
     } finally {
       setPlacingOrder(false);
     }
+  };
+
+  // Re-order past order items into cart
+  const handleReorderItems = (items: { productId: string; quantity: number }[]) => {
+    setCart(prev => {
+      const next = [...prev];
+      for (const it of items) {
+        const prod = products.find(p => p.id === it.productId);
+        if (!prod) continue;
+        const existingIdx = next.findIndex(ci => ci.product.id === it.productId);
+        if (existingIdx >= 0) {
+          next[existingIdx].quantity += it.quantity;
+        } else {
+          next.push({ product: prod, quantity: it.quantity });
+        }
+      }
+      return next;
+    });
+    setIsCartOpen(true);
   };
 
   // Inline customer login / register
@@ -431,7 +486,9 @@ export const StorefrontPage: React.FC<Props> = ({
     onSelectCategory: setActiveCategory,
     cartCount: totalItemCount,
     onOpenCart: () => setIsCartOpen(true),
-    onAddToCart: handleAddToCart
+    onAddToCart: handleAddToCart,
+    onOpenOrderHistory: () => setIsOrderHistoryOpen(true),
+    orderCount: orderCount
   };
 
   return (
@@ -450,6 +507,104 @@ export const StorefrontPage: React.FC<Props> = ({
         <BoldTheme {...themeProps} />
       ) : (
         <ClassicTheme {...themeProps} />
+      )}
+
+      {/* Sticky Bottom Cart Bar for Mobile Viewports */}
+      {totalItemCount > 0 && !isCartOpen && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            left: "16px",
+            right: "16px",
+            zIndex: 800,
+            display: "flex",
+            justifyContent: "center"
+          }}
+        >
+          <button
+            onClick={() => setIsCartOpen(true)}
+            style={{
+              width: "100%",
+              maxWidth: "480px",
+              padding: "14px 20px",
+              borderRadius: "9999px",
+              backgroundColor: store.brandColor || "var(--color-forest)",
+              color: "#FFFFFF",
+              fontWeight: 700,
+              fontSize: "15px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              border: "none",
+              cursor: "pointer"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <span
+                style={{
+                  background: "rgba(255,255,255,0.22)",
+                  padding: "3px 10px",
+                  borderRadius: "9999px",
+                  fontSize: "13px",
+                  fontWeight: 800
+                }}
+              >
+                {totalItemCount} {totalItemCount === 1 ? "item" : "items"}
+              </span>
+              <span>View Cart & Checkout</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>{formatPaise(totalPaiseSubtotal)}</span>
+              <span style={{ fontSize: "16px" }}>→</span>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Floating Track Orders Pill when cart is empty */}
+      {totalItemCount === 0 && orderCount > 0 && !isCartOpen && !isOrderHistoryOpen && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "16px",
+            zIndex: 800
+          }}
+        >
+          <button
+            onClick={() => setIsOrderHistoryOpen(true)}
+            style={{
+              padding: "12px 20px",
+              borderRadius: "9999px",
+              backgroundColor: "#FFFFFF",
+              color: store.brandColor,
+              fontWeight: 700,
+              fontSize: "14px",
+              boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+              border: `1.5px solid ${store.brandColor}`,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer"
+            }}
+          >
+            <span>📋 Track Orders</span>
+            <span
+              style={{
+                background: store.brandColor,
+                color: "#FFFFFF",
+                padding: "2px 8px",
+                borderRadius: "9999px",
+                fontSize: "11px",
+                fontWeight: 800
+              }}
+            >
+              {orderCount}
+            </span>
+          </button>
+        </div>
       )}
 
       {/* Cart Drawer & Checkout Modal */}
@@ -476,9 +631,31 @@ export const StorefrontPage: React.FC<Props> = ({
             }}
           >
             {/* Drawer Header */}
-            <div style={{ padding: "20px 24px", borderBottom: "1px solid #E5EADF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2 style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>Your Cart ({totalItemCount})</h2>
-              <button onClick={() => setIsCartOpen(false)} style={{ background: "none", fontSize: "20px", color: "var(--color-muted)", padding: "4px" }}>
+            <div style={{ padding: "18px 24px", borderBottom: "1px solid #E5EADF", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#FAFAF7" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <h2 style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>Your Cart ({totalItemCount})</h2>
+                {orderCount > 0 && (
+                  <button
+                    onClick={() => {
+                      setIsCartOpen(false);
+                      setIsOrderHistoryOpen(true);
+                    }}
+                    style={{
+                      background: "none",
+                      color: store.brandColor,
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                      border: "none"
+                    }}
+                  >
+                    Past Orders ({orderCount})
+                  </button>
+                )}
+              </div>
+              <button onClick={() => setIsCartOpen(false)} style={{ background: "none", fontSize: "20px", color: "var(--color-muted)", padding: "4px", border: "none", cursor: "pointer" }}>
                 ✕
               </button>
             </div>
@@ -883,6 +1060,23 @@ export const StorefrontPage: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* Order History Component */}
+      <OrderHistory
+        store={store}
+        customerSession={customerSession}
+        isOpen={isOrderHistoryOpen}
+        onClose={() => setIsOrderHistoryOpen(false)}
+        onSelectOrderToTrack={(orderNum) => {
+          setIsOrderHistoryOpen(false);
+          onNavigate(`#/store/${slug}/order/${orderNum}`);
+        }}
+        onReorderItems={handleReorderItems}
+        onCustomerLoginRequest={() => {
+          setIsOrderHistoryOpen(false);
+          setIsCartOpen(true);
+        }}
+      />
     </div>
   );
 };

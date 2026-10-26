@@ -1,0 +1,209 @@
+{
+  "entities": {
+    "Store": {
+      "title": "Store",
+      "description": "MintShelf digital store profile and settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUserId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 100 },
+        "planSlug": { "type": "string", "enum": ["offline", "franchise", "online"] },
+        "themeKey": { "type": "string", "enum": ["classic", "minimal", "bold"] },
+        "brandColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "brandType": { "type": "string" },
+        "description": { "type": "string", "maxLength": 500 },
+        "extraSeats": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "onlineOpen": { "type": "boolean" },
+        "pickupEnabled": { "type": "boolean" },
+        "deliveryEnabled": { "type": "boolean" },
+        "deliveryFeePaise": { "type": "number" },
+        "freeDeliveryAbovePaise": { "type": "number" },
+        "minOrderPaise": { "type": "number" },
+        "deliveryNote": { "type": "string", "maxLength": 500 },
+        "acceptUpiQr": { "type": "boolean" },
+        "acceptCod": { "type": "boolean" },
+        "upiId": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "ownerUserId", "name", "slug", "planSlug", "themeKey", "brandColor", "isActive", "createdAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product category grouping",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "storeId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "sortOrder": { "type": "number" }
+      },
+      "required": ["id", "storeId", "name"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Store catalogue item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "storeId": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "pricePaise": { "type": "number" },
+        "stock": { "type": "number" },
+        "isAvailable": { "type": "boolean" },
+        "image": { "type": "string" },
+        "createdByUserId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "storeId", "categoryId", "name", "pricePaise", "isAvailable", "createdAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Store customer order record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "number": { "type": "string" },
+        "storeId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "customerPhone": { "type": "string", "maxLength": 30 },
+        "items": { "type": "array" },
+        "subtotalPaise": { "type": "number" },
+        "deliveryFeePaise": { "type": "number" },
+        "totalPaise": { "type": "number" },
+        "status": { "type": "string", "enum": ["placed", "accepted", "preparing", "ready", "delivered", "cancelled"] },
+        "fulfilment": { "type": "string", "enum": ["pickup", "delivery"] },
+        "deliveryAddressText": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["upi", "cod"] },
+        "paymentStatus": { "type": "string", "enum": ["pending", "verified", "failed"] },
+        "paymentReference": { "type": "string" },
+        "note": { "type": "string" },
+        "referralCode": { "type": "string" },
+        "createdByRole": { "type": "string" },
+        "createdByUserId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "completedAt": { "type": "number" },
+        "cancelledAt": { "type": "number" }
+      },
+      "required": ["id", "number", "storeId", "customerName", "customerPhone", "items", "totalPaise", "status", "paymentMethod", "paymentStatus", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Staff or Owner merchant account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string", "maxLength": 50 },
+        "passwordHash": { "type": "string" },
+        "salt": { "type": "string" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "username", "passwordHash", "salt", "displayName", "isActive", "createdAt"]
+    },
+    "Membership": {
+      "title": "Membership",
+      "description": "User store role assignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "storeId": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "staff"] },
+        "referralCode": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "storeId", "role", "referralCode", "isActive"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "End customer account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "storeId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "passwordHash": { "type": "string" },
+        "salt": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "storeId", "name", "phone", "passwordHash", "salt", "createdAt"]
+    },
+    "CustomerAddress": {
+      "title": "CustomerAddress",
+      "description": "Saved customer delivery address",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "label": { "type": "string", "maxLength": 50 },
+        "street": { "type": "string", "maxLength": 200 },
+        "landmark": { "type": "string", "maxLength": 200 },
+        "pincode": { "type": "string", "maxLength": 20 },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "customerId", "label", "street", "pincode", "isDefault", "createdAt"]
+    },
+    "StatusEvent": {
+      "title": "StatusEvent",
+      "description": "Order lifecycle status transition event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "storeId": { "type": "string" },
+        "fromStatus": { "type": "string" },
+        "toStatus": { "type": "string" },
+        "changedByUserId": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "orderId", "storeId", "fromStatus", "toStatus", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/stores/{storeId}": {
+      "schema": { "$ref": "#/entities/Store" },
+      "description": "Store profiles"
+    },
+    "/stores/{storeId}/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Store categories"
+    },
+    "/stores/{storeId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Store catalog products"
+    },
+    "/stores/{storeId}/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Store customer orders"
+    },
+    "/stores/{storeId}/orders/{orderId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/StatusEvent" },
+      "description": "Order status update events"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Merchant accounts"
+    },
+    "/memberships/{membershipId}": {
+      "schema": { "$ref": "#/entities/Membership" },
+      "description": "Store memberships and roles"
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Customer accounts"
+    },
+    "/customers/{customerId}/addresses/{addressId}": {
+      "schema": { "$ref": "#/entities/CustomerAddress" },
+      "description": "Customer delivery addresses"
+    }
+  }
+}

@@ -12,6 +12,80 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Inter+Tight:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        // Shield the app from third-party browser extension injection noise (e.g. MetaMask inpage.js failing in iframes)
+        function isExtensionNoise(err) {
+          if (!err) return false;
+          try {
+            var str = '';
+            if (typeof err === 'string') {
+              str = err;
+            } else if (err instanceof Error || (typeof err === 'object' && ('message' in err || 'stack' in err))) {
+              str = ((err.message || '') + ' ' + (err.stack || '') + ' ' + (err.name || ''));
+            } else {
+              str = String(err);
+            }
+            return (
+              str.indexOf('MetaMask') !== -1 ||
+              str.indexOf('chrome-extension://') !== -1 ||
+              str.indexOf('moz-extension://') !== -1 ||
+              str.indexOf('inpage.js') !== -1 ||
+              str.indexOf('ethereum') !== -1 ||
+              str.indexOf('Failed to connect to MetaMask') !== -1
+            );
+          } catch (e) {
+            return false;
+          }
+        }
+
+        // 1. Intercept console.error & console.warn so external extension failures are not captured as app runtime errors
+        var origError = console.error;
+        console.error = function() {
+          for (var i = 0; i < arguments.length; i++) {
+            if (isExtensionNoise(arguments[i])) {
+              return;
+            }
+          }
+          return origError.apply(console, arguments);
+        };
+
+        var origWarn = console.warn;
+        console.warn = function() {
+          for (var i = 0; i < arguments.length; i++) {
+            if (isExtensionNoise(arguments[i])) {
+              return;
+            }
+          }
+          return origWarn.apply(console, arguments);
+        };
+
+        // 2. Prevent unhandled promise rejections from extensions bubbling up
+        window.addEventListener('unhandledrejection', function(event) {
+          if (isExtensionNoise(event.reason)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        // 3. Prevent global uncaught errors from extensions
+        window.addEventListener('error', function(event) {
+          var filename = event.filename || '';
+          var msg = event.message || '';
+          if (
+            filename.indexOf('chrome-extension://') !== -1 ||
+            filename.indexOf('moz-extension://') !== -1 ||
+            filename.indexOf('inpage.js') !== -1 ||
+            isExtensionNoise(msg) ||
+            isExtensionNoise(event.error)
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
     <style>
       :root {
         --color-bg: #F5F8EF;

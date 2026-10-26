@@ -11,7 +11,9 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
   cartCount,
   onOpenCart,
   onAddToCart,
-  isDemo
+  isDemo,
+  onOpenOrderHistory,
+  orderCount
 }) => {
   const filtered = activeCategoryId
     ? products.filter(p => p.categoryId === activeCategoryId && (isDemo || p.isAvailable))
@@ -20,17 +22,30 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
   return (
     <div style={{ backgroundColor: "#FAFAF9", minHeight: "100vh", color: "#1C1917", fontFamily: "Georgia, serif" }}>
       {/* Typographic Header */}
-      <header style={{ borderBottom: "1px solid #E7E5E4", padding: "32px 32px 24px", maxWidth: "960px", margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <header style={{ borderBottom: "1px solid #E7E5E4", padding: "32px 32px 24px", maxWidth: "960px", margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "16px" }}>
         <div>
           <h1 style={{ fontSize: "28px", letterSpacing: "-0.02em", margin: 0, fontWeight: 500, color: store.brandColor }}>{store.name}</h1>
           <p style={{ fontSize: "14px", color: "#78716C", fontStyle: "italic", marginTop: "6px" }}>{store.description}</p>
         </div>
-        <button
-          onClick={onOpenCart}
-          style={{ background: "transparent", borderBottom: `2px solid ${store.brandColor}`, padding: "4px 8px", fontSize: "14px", color: store.brandColor, fontWeight: 600 }}
-        >
-          Bag ({cartCount})
-        </button>
+        <div style={{ display: "flex", gap: "16px", alignItems: "baseline" }}>
+          {onOpenOrderHistory && (
+            <button
+              onClick={onOpenOrderHistory}
+              style={{ background: "transparent", border: "none", borderBottom: "1px solid #A8A29E", padding: "4px 6px", fontSize: "13px", color: "#78716C", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+            >
+              <span>Orders</span>
+              {typeof orderCount === "number" && orderCount > 0 && (
+                <span style={{ fontSize: "11px", fontWeight: 700, color: store.brandColor }}>({orderCount})</span>
+              )}
+            </button>
+          )}
+          <button
+            onClick={onOpenCart}
+            style={{ background: "transparent", border: "none", borderBottom: `2px solid ${store.brandColor}`, padding: "4px 8px", fontSize: "14px", color: store.brandColor, fontWeight: 600, cursor: "pointer" }}
+          >
+            Bag ({cartCount})
+          </button>
+        </div>
       </header>
 
       {/* Minimal category line */}

@@ -29,6 +29,7 @@ export interface Store {
   acceptCod: boolean;
   upiId: string;
   upiQrImage?: string;
+  brandType?: string;
   createdAt: number;
 }
 

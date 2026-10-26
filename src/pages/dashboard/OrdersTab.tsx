@@ -3,6 +3,7 @@ import { SessionContext, Order, OrderStatus, Store, Membership, User } from "../
 import { defaultRepository } from "../../repository/storage";
 import { OrderService } from "../../services/orderService";
 import { formatPaise } from "../../utils/money";
+import { apiUpdateOrderStatus, apiUpdatePaymentStatus } from "../../services/apiClient";
 
 interface Props {
   session: SessionContext;
@@ -43,7 +44,11 @@ export const OrdersTab: React.FC<Props> = ({ session }) => {
 
   const handleStatusChange = async (orderId: string, nextStatus: OrderStatus) => {
     try {
-      await orderService.updateOrderStatus(session, orderId, nextStatus);
+      try {
+        await apiUpdateOrderStatus(session.storeId, orderId, nextStatus);
+      } catch {
+        await orderService.updateOrderStatus(session, orderId, nextStatus);
+      }
       loadData();
       if (selectedOrder && selectedOrder.id === orderId) {
         const updated = await defaultRepository.getOrderById(session.storeId, orderId);
@@ -56,7 +61,11 @@ export const OrdersTab: React.FC<Props> = ({ session }) => {
 
   const handlePaymentStatusChange = async (orderId: string, status: "received" | "failed") => {
     try {
-      await orderService.updatePaymentStatus(session, orderId, status);
+      try {
+        await apiUpdatePaymentStatus(session.storeId, orderId, status);
+      } catch {
+        await orderService.updatePaymentStatus(session, orderId, status);
+      }
       loadData();
       if (selectedOrder && selectedOrder.id === orderId) {
         const updated = await defaultRepository.getOrderById(session.storeId, orderId);
@@ -274,9 +283,16 @@ export const OrdersTab: React.FC<Props> = ({ session }) => {
             <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 8px" }}>Ordered Items</h4>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
               {selectedOrder.items.map((it, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-                  <span>{it.nameSnapshot} <b>× {it.quantity}</b></span>
-                  <span style={{ fontWeight: 600 }}>{formatPaise(it.unitPricePaise * it.quantity)}</span>
+                <div key={i} style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "13px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>{it.nameSnapshot} <b>× {it.quantity}</b></span>
+                    <span style={{ fontWeight: 600 }}>{formatPaise(it.unitPricePaise * it.quantity)}</span>
+                  </div>
+                  {it.note && (
+                    <div style={{ fontSize: "11px", color: "var(--color-muted)", fontStyle: "italic", paddingLeft: "4px" }}>
+                      Note: {it.note}
+                    </div>
+                  )}
                 </div>
               ))}
               {selectedOrder.deliveryFeePaise > 0 && (

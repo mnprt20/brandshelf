@@ -3,6 +3,7 @@ import { AuthService } from "../services/authService";
 import { CatalogService } from "../services/catalogService";
 import { defaultRepository } from "../repository/storage";
 import { SessionContext, User, Store } from "../types";
+import { apiFranchiseSignup } from "../services/apiClient";
 
 interface Props {
   onNavigate: (route: string) => void;
@@ -55,22 +56,38 @@ export const FranchiseSignupPage: React.FC<Props> = ({ onNavigate, onLoginSucces
 
     setLoading(true);
     try {
-      const auth = new AuthService(defaultRepository);
+      let createdUser: User;
+      let createdStore: Store;
+      let session: SessionContext;
+
+      try {
+        const res = await apiFranchiseSignup(businessName, ownerName, password, {
+          brandType: "cafe",
+          themeKey: "classic",
+          brandColor: "#08482D",
+          description: `Welcome to ${businessName.trim()}! Specializing in quality products and dedicated customer service.`
+        });
+        createdUser = res.user;
+        createdStore = res.store;
+        session = res.session;
+      } catch {
+        const auth = new AuthService(defaultRepository);
+        const { user, store } = await auth.signupFranchise(businessName, ownerName, password, {
+          brandType: "cafe",
+          themeKey: "classic",
+          brandColor: "#08482D",
+          description: `Welcome to ${businessName.trim()}! Specializing in quality products and dedicated customer service.`
+        });
+        createdUser = user;
+        createdStore = store;
+        session = {
+          userId: user.id,
+          storeId: store.id,
+          role: "owner"
+        };
+      }
+
       const catalog = new CatalogService(defaultRepository);
-
-      // Create store on franchise plan with generated owner user ID
-      const { user, store } = await auth.signupFranchise(businessName, ownerName, password, {
-        brandType: "cafe",
-        themeKey: "classic",
-        brandColor: "#08482D",
-        description: `Welcome to ${businessName.trim()}! Specializing in quality products and dedicated customer service.`
-      });
-
-      const session: SessionContext = {
-        userId: user.id,
-        storeId: store.id,
-        role: "owner"
-      };
 
       // Create initial starter categories so the catalog is ready to receive products
       try {
@@ -88,7 +105,7 @@ export const FranchiseSignupPage: React.FC<Props> = ({ onNavigate, onLoginSucces
         console.warn("Starter catalog creation:", catErr);
       }
 
-      setCreatedInfo({ user, store, session });
+      setCreatedInfo({ user: createdUser, store: createdStore, session });
     } catch (err: any) {
       setError(err.message || "Failed to create franchise store");
     } finally {

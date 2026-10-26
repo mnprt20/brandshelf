@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { PROJECT_NAME, PLAN_PRICES, PLANS } from "../config/constants";
 import { CurvedVideoCarousel } from "../components/CurvedVideoCarousel";
 import { THEME_REGISTRY } from "../themes/registry";
+import { HERO_CAROUSEL_PRODUCTS } from "../config/carouselProducts";
 
 interface Props {
   onNavigate: (route: string) => void;
@@ -125,29 +126,7 @@ export const LandingPage: React.FC<Props> = ({ onNavigate }) => {
               WebkitOverflowScrolling: "touch"
             }}
           >
-            {[
-              {
-                title: "Apparel & Fashion",
-                item: "Heavyweight Cotton Tee",
-                price: "₹1,499",
-                img: "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=400&auto=format&fit=crop&q=80",
-                badge: "Minimalist Theme"
-              },
-              {
-                title: "Artisan Bakery",
-                item: "Country Sourdough Loaf",
-                price: "₹280",
-                img: "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&auto=format&fit=crop&q=80",
-                badge: "Classic Theme"
-              },
-              {
-                title: "Specialty Coffee",
-                item: "Malabar Whole Beans",
-                price: "₹550",
-                img: "https://images.unsplash.com/photo-1559056199-641a0ac8b55e?w=400&auto=format&fit=crop&q=80",
-                badge: "Bold Theme"
-              }
-            ].map((card, idx) => (
+            {HERO_CAROUSEL_PRODUCTS.map((card, idx) => (
               <div
                 key={idx}
                 style={{
@@ -163,14 +142,14 @@ export const LandingPage: React.FC<Props> = ({ onNavigate }) => {
                 }}
               >
                 <div style={{ height: "140px", overflow: "hidden", position: "relative" }}>
-                  <img src={card.img} alt={card.item} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img src={card.image} alt={card.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   <span style={{ position: "absolute", top: "8px", left: "8px", background: "rgba(0,0,0,0.65)", color: "#FFFFFF", padding: "2px 8px", borderRadius: "9999px", fontSize: "10px", fontWeight: 600 }}>
-                    {card.badge}
+                    {card.theme} Theme
                   </span>
                 </div>
                 <div style={{ padding: "12px" }}>
-                  <div style={{ fontSize: "11px", color: "var(--color-forest)", fontWeight: 700, textTransform: "uppercase" }}>{card.title}</div>
-                  <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-ink)", margin: "2px 0 4px" }}>{card.item}</div>
+                  <div style={{ fontSize: "11px", color: "var(--color-forest)", fontWeight: 700, textTransform: "uppercase" }}>{card.category}</div>
+                  <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-ink)", margin: "2px 0 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{card.title}</div>
                   <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--color-forest)" }}>{card.price}</div>
                 </div>
               </div>

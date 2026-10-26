@@ -11,6 +11,7 @@ export const ClassicTheme: React.FC<ThemeSharedProps> = ({
   cartCount,
   onOpenCart,
   onAddToCart,
+  onSelectProduct,
   isDemo,
   onOpenOrderHistory,
   orderCount
@@ -105,7 +106,19 @@ export const ClassicTheme: React.FC<ThemeSharedProps> = ({
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "20px" }}>
             {filtered.map(p => (
-              <div key={p.id} style={{ background: "#FFFFFF", borderRadius: "16px", border: "1px solid #E5EADF", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+              <div
+                key={p.id}
+                onClick={() => onSelectProduct?.(p)}
+                style={{
+                  background: "#FFFFFF",
+                  borderRadius: "16px",
+                  border: "1px solid #E5EADF",
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  cursor: onSelectProduct ? "pointer" : "default"
+                }}
+              >
                 <div style={{ height: "160px", backgroundColor: "#E9F0E1", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {p.image ? (
                     <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -120,7 +133,10 @@ export const ClassicTheme: React.FC<ThemeSharedProps> = ({
                     <span style={{ fontSize: "18px", fontWeight: 700, color: store.brandColor }}>{formatPaise(p.pricePaise)}</span>
                     <button
                       disabled={isDemo || (p.stock !== null && p.stock <= 0)}
-                      onClick={() => onAddToCart(p)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(p);
+                      }}
                       style={{
                         background: store.brandColor,
                         color: "#FFFFFF",
@@ -128,6 +144,8 @@ export const ClassicTheme: React.FC<ThemeSharedProps> = ({
                         borderRadius: "9999px",
                         fontSize: "13px",
                         fontWeight: 600,
+                        border: "none",
+                        cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer",
                         opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1
                       }}
                     >

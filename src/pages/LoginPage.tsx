@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { AuthService } from "../services/authService";
 import { defaultRepository } from "../repository/storage";
 import { SessionContext } from "../types";
+import { apiMerchantLogin } from "../services/apiClient";
 
 interface Props {
   onNavigate: (route: string) => void;
@@ -20,15 +21,22 @@ export const LoginPage: React.FC<Props> = ({ onNavigate, onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      const auth = new AuthService(defaultRepository);
-      const { user, memberships } = await auth.login(username, password);
-      const target = memberships[0];
-      onLoginSuccess({
-        userId: user.id,
-        storeId: target.storeId,
-        role: target.role
-      });
-      onNavigate("#/dashboard/overview");
+      try {
+        const session = await apiMerchantLogin(username, password);
+        onLoginSuccess(session);
+        onNavigate("#/dashboard/overview");
+      } catch (apiErr: any) {
+        // Fall back to local service if server unreachable
+        const auth = new AuthService(defaultRepository);
+        const { user, memberships } = await auth.login(username, password);
+        const target = memberships[0];
+        onLoginSuccess({
+          userId: user.id,
+          storeId: target.storeId,
+          role: target.role
+        });
+        onNavigate("#/dashboard/overview");
+      }
     } catch (err: any) {
       setError(err.message || "Failed to log in");
     } finally {

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from "react";
 import { computeCarouselLayout, CardGeometry } from "../utils/heroGeometry";
+import { HERO_CAROUSEL_PRODUCTS, CarouselProduct } from "../config/carouselProducts";
 
 interface Props {
   scaleUnit: number;
@@ -12,7 +13,6 @@ export const CurvedVideoCarousel: React.FC<Props> = ({ scaleUnit }) => {
   const lastOffset = useRef(0);
   const velocity = useRef(0);
   const lastTimestamp = useRef(0);
-  const [videoFailed, setVideoFailed] = useState(false);
 
   useEffect(() => {
     let animId: number;
@@ -58,9 +58,6 @@ export const CurvedVideoCarousel: React.FC<Props> = ({ scaleUnit }) => {
 
   const cards: CardGeometry[] = computeCarouselLayout(offset);
 
-  const videoPoster = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=600&auto=format&fit=crop&q=80";
-  const videoLoop = "https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/04fd3d5f-99d7-476e-98a4-46c08518ffb3.mp4";
-
   return (
     <div
       onPointerDown={onPointerDown}
@@ -80,10 +77,7 @@ export const CurvedVideoCarousel: React.FC<Props> = ({ scaleUnit }) => {
       }}
     >
       {cards.map(card => {
-        const col = card.index % 5;
-        const row = Math.floor(card.index / 5);
-        const tileW = card.width;
-        const tileH = Math.max(card.leftHeight, card.width / 0.7111);
+        const prod: CarouselProduct = HERO_CAROUSEL_PRODUCTS[card.index % HERO_CAROUSEL_PRODUCTS.length];
 
         return (
           <div
@@ -95,59 +89,151 @@ export const CurvedVideoCarousel: React.FC<Props> = ({ scaleUnit }) => {
               width: `${card.width}px`,
               height: `${Math.max(card.leftHeight, card.rightHeight)}px`,
               clipPath: card.clipPath,
-              borderRadius: "15px",
+              borderRadius: "16px",
               overflow: "hidden",
-              backgroundColor: "#E2EBD6"
+              backgroundColor: "#1B3B2B",
+              boxShadow: "0 14px 28px rgba(0,0,0,0.18), 0 10px 10px rgba(0,0,0,0.12)"
             }}
           >
-            {!videoFailed ? (
-              <video
-                src={videoLoop}
-                poster={videoPoster}
-                autoPlay
-                muted
-                loop
-                playsInline
-                onError={() => setVideoFailed(true)}
-                style={{
-                  position: "absolute",
-                  width: `${tileW * 5}px`,
-                  height: `${tileH * 2}px`,
-                  left: `-${col * tileW}px`,
-                  top: `-${row * tileH}px`,
-                  objectFit: "cover"
-                }}
-              />
-            ) : (
-              <div
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  background: "linear-gradient(135deg, #08482D, #2B6E4F)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#FFFFFF",
-                  fontSize: "24px"
-                }}
-              >
-                🌿
-              </div>
-            )}
+            {/* Full-bleed Product Image */}
+            <img
+              src={prod.image}
+              alt={prod.title}
+              loading="eager"
+              onError={(e) => {
+                // Reliable fallback
+                e.currentTarget.src = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=600&auto=format&fit=crop&q=80";
+              }}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block"
+              }}
+            />
+
+            {/* Top Category Badge */}
             <div
               style={{
                 position: "absolute",
-                bottom: "12px",
-                left: "12px",
-                width: "32px",
-                height: "32px",
+                top: "10px",
+                left: "10px",
+                right: "10px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                pointerEvents: "none"
+              }}
+            >
+              <span
+                style={{
+                  backgroundColor: "rgba(255, 255, 255, 0.92)",
+                  backdropFilter: "blur(8px)",
+                  color: "var(--color-forest)",
+                  padding: "3px 8px",
+                  borderRadius: "9999px",
+                  fontSize: "10.5px",
+                  fontWeight: 700,
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.12)",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                {prod.category}
+              </span>
+              <span
+                style={{
+                  backgroundColor: "rgba(0, 0, 0, 0.55)",
+                  backdropFilter: "blur(6px)",
+                  color: "#FFFFFF",
+                  padding: "2px 6px",
+                  borderRadius: "9999px",
+                  fontSize: "9.5px",
+                  fontWeight: 600,
+                  whiteSpace: "nowrap"
+                }}
+              >
+                {prod.tag}
+              </span>
+            </div>
+
+            {/* Bottom Gradient + Title & Price */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                padding: "36px 12px 12px",
+                background: "linear-gradient(to top, rgba(7, 34, 22, 0.95) 0%, rgba(7, 34, 22, 0.72) 55%, rgba(7, 34, 22, 0) 100%)",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+                pointerEvents: "none"
+              }}
+            >
+              <div
+                style={{
+                  color: "#FFFFFF",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  lineHeight: "16px",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }}
+              >
+                {prod.title}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginTop: "3px"
+                }}
+              >
+                <span
+                  style={{
+                    color: "#A7F3D0",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    letterSpacing: "-0.01em"
+                  }}
+                >
+                  {prod.price}
+                </span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: "rgba(255,255,255,0.9)",
+                    backgroundColor: "rgba(255,255,255,0.2)",
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    fontWeight: 600
+                  }}
+                >
+                  {prod.theme}
+                </span>
+              </div>
+            </div>
+
+            {/* Shopping Bag Glass Icon */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: "10px",
+                right: "10px",
+                width: "26px",
+                height: "26px",
                 borderRadius: "50%",
-                backgroundColor: "rgba(255, 255, 255, 0.55)",
+                backgroundColor: "rgba(255, 255, 255, 0.45)",
                 backdropFilter: "blur(6px)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: "14px"
+                fontSize: "12px",
+                pointerEvents: "none"
               }}
             >
               🛍️

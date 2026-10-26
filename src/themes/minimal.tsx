@@ -11,6 +11,7 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
   cartCount,
   onOpenCart,
   onAddToCart,
+  onSelectProduct,
   isDemo,
   onOpenOrderHistory,
   orderCount
@@ -76,7 +77,18 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {filtered.map(p => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0", borderBottom: "1px dashed #E7E5E4" }}>
+              <div
+                key={p.id}
+                onClick={() => onSelectProduct?.(p)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "16px 0",
+                  borderBottom: "1px dashed #E7E5E4",
+                  cursor: onSelectProduct ? "pointer" : "default"
+                }}
+              >
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
                   {p.image ? (
                     <img src={p.image} alt={p.name} style={{ width: "64px", height: "64px", objectFit: "cover", borderRadius: "4px" }} />
@@ -92,8 +104,11 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
                   <span style={{ fontSize: "15px", fontWeight: 600 }}>{formatPaise(p.pricePaise)}</span>
                   <button
                     disabled={isDemo || (p.stock !== null && p.stock <= 0)}
-                    onClick={() => onAddToCart(p)}
-                    style={{ border: `1px solid ${store.brandColor}`, color: store.brandColor, background: "#FFF", padding: "6px 14px", borderRadius: "2px", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddToCart(p);
+                    }}
+                    style={{ border: `1px solid ${store.brandColor}`, color: store.brandColor, background: "#FFF", padding: "6px 14px", borderRadius: "2px", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
                   >
                     {p.stock !== null && p.stock <= 0 ? "Unavailable" : "+ Add"}
                   </button>

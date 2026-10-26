@@ -1,66 +1,10 @@
 import { IModelAdapter, ToolSchema, AgentResponse } from "./types";
 
 export class GeminiAdapter implements IModelAdapter {
-  private apiKey: string;
-  private modelName = "gemini-2.5-flash";
-
-  constructor(apiKey?: string) {
-    this.apiKey = apiKey || (typeof process !== "undefined" && process.env?.GEMINI_API_KEY ? process.env.GEMINI_API_KEY : "");
-  }
+  constructor() {}
 
   async generate(systemPrompt: string, messages: { role: string; content: string }[], toolSchemas: ToolSchema[]): Promise<AgentResponse> {
     const lastMsg = messages[messages.length - 1]?.content || "";
-
-    // If API Key is present, make real call
-    if (this.apiKey) {
-      try {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelName}:generateContent?key=${this.apiKey}`;
-        
-        const contents = messages.map(m => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }]
-        }));
-
-        const toolsPayload = toolSchemas.length > 0 ? [{
-          functionDeclarations: toolSchemas.map(t => ({
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters
-          }))
-        }] : undefined;
-
-        const body: any = {
-          contents,
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          generationConfig: { temperature: 0.2 }
-        };
-        if (toolsPayload) body.tools = toolsPayload;
-
-        const resp = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
-
-        if (resp.ok) {
-          const data = await resp.json();
-          const candidate = data.candidates?.[0]?.content?.parts?.[0];
-          if (candidate?.functionCall) {
-            return {
-              toolCalls: [{
-                name: candidate.functionCall.name,
-                args: candidate.functionCall.args || {}
-              }]
-            };
-          }
-          if (candidate?.text) {
-            return { text: candidate.text };
-          }
-        }
-      } catch {
-        // Fall back to rule-based assistant below
-      }
-    }
 
     // Natural Language Rule-Based Fallback for Prototype Mode:
     const lower = lastMsg.toLowerCase();

@@ -6,10 +6,9 @@
 import React, { useState, useEffect } from "react";
 import { SessionContext, CustomerSessionContext } from "./types";
 import { defaultRepository } from "./repository/storage";
-import { seedDemoData } from "./services/seedData";
 import { AuthService } from "./services/authService";
 import { CustomerService } from "./services/customerService";
-import { testConnection } from "./services/firebase";
+import { testConnection, auth } from "./services/firebase";
 
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -32,43 +31,51 @@ import { ReportsTab } from "./pages/dashboard/ReportsTab";
 import { SettingsTab } from "./pages/dashboard/SettingsTab";
 import { AiAssistantTab } from "./pages/dashboard/AiAssistantTab";
 
-const SESSION_STORAGE_KEY = "mintshelf_active_session";
-const CUSTOMER_SESSION_STORAGE_KEY = "mintshelf_customer_session";
-
 export default function App() {
   const [currentHash, setCurrentHash] = useState<string>(window.location.hash || "#/");
-  const [session, setSession] = useState<SessionContext | null>(() => {
-    try {
-      const saved = localStorage.getItem(SESSION_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [customerSession, setCustomerSession] = useState<CustomerSessionContext | null>(() => {
-    try {
-      const saved = localStorage.getItem(CUSTOMER_SESSION_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
+  const [session, setSession] = useState<SessionContext | null>(null);
+  const [customerSession, setCustomerSession] = useState<CustomerSessionContext | null>(null);
   const [initialized, setInitialized] = useState(false);
 
-  // Initialize seed demo data on first load and verify Firestore connection
+  // Sync session state from Firebase Auth token claims
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+      if (currentUser) {
+        try {
+          const idTokenResult = await currentUser.getIdTokenResult();
+          const claims = idTokenResult.claims;
+          if (claims.role === "owner" || claims.role === "staff") {
+            setSession({
+              userId: (claims.userId as string) || currentUser.uid,
+              storeId: (claims.storeId as string) || "",
+              role: claims.role as "owner" | "staff"
+            });
+          } else if (claims.role === "customer") {
+            setCustomerSession({
+              customerId: (claims.customerId as string) || currentUser.uid.replace(/^cust_/, ""),
+              storeId: (claims.storeId as string) || "",
+              name: (claims.name as string) || currentUser.displayName || "Customer",
+              phone: (claims.phone as string) || ""
+            });
+          }
+        } catch (e) {
+          console.warn("Error deriving claims from token:", e);
+        }
+      } else {
+        setSession(null);
+        setCustomerSession(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Verify Firestore connection on boot (client seed removed)
   useEffect(() => {
     const init = async () => {
       try {
         await testConnection();
       } catch (e) {
         console.warn("Firestore connection check:", e);
-      }
-      try {
-        await seedDemoData(defaultRepository);
-      } catch (e) {
-        console.warn("Demo data initialization notice:", e);
       }
       setInitialized(true);
     };
@@ -88,31 +95,25 @@ export default function App() {
 
   const handleLoginSuccess = (newSession: SessionContext) => {
     setSession(newSession);
-    try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(newSession));
-    } catch {}
   };
 
-  const handleLogout = () => {
-    setSession(null);
+  const handleLogout = async () => {
     try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
+      await auth.signOut();
     } catch {}
+    setSession(null);
     navigateTo("#/");
   };
 
   const handleCustomerLogin = (cSession: CustomerSessionContext) => {
     setCustomerSession(cSession);
-    try {
-      localStorage.setItem(CUSTOMER_SESSION_STORAGE_KEY, JSON.stringify(cSession));
-    } catch {}
   };
 
-  const handleCustomerLogout = () => {
-    setCustomerSession(null);
+  const handleCustomerLogout = async () => {
     try {
-      localStorage.removeItem(CUSTOMER_SESSION_STORAGE_KEY);
+      await auth.signOut();
     } catch {}
+    setCustomerSession(null);
   };
 
   // Quick Demo Login helper for 4 personas
@@ -200,8 +201,19 @@ export default function App() {
     );
   }
 
-  // ROUTE 5: Diagnostics
+  // ROUTE 5: Diagnostics (blocked unless import.meta.env.DEV is true)
   if (segments[0] === "diagnostics") {
+    if (!import.meta.env.DEV) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#F5F8EF", padding: "24px", textAlign: "center" }}>
+          <h2 style={{ fontSize: "24px", fontWeight: 700, margin: "0 0 8px" }}>Diagnostics Unavailable</h2>
+          <p style={{ color: "var(--color-muted)", marginBottom: "20px" }}>The test diagnostics suite is only accessible in development mode.</p>
+          <button onClick={() => navigateTo("#/")} style={{ background: "var(--color-forest)", color: "#FFFFFF", padding: "10px 24px", borderRadius: "9999px", fontWeight: 600 }}>
+            Back to Home
+          </button>
+        </div>
+      );
+    }
     return <DiagnosticsPage onNavigate={navigateTo} />;
   }
 

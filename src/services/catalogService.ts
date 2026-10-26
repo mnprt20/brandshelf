@@ -43,6 +43,9 @@ export class CatalogService {
     stock: number | null;
     isAvailable: boolean;
     image?: string;
+    images?: string[];
+    isFeatured?: boolean;
+    isBestSeller?: boolean;
   }): Promise<Product> {
     if (session.role !== "owner") throw new Error("Staff cannot manage products");
     if (productData.pricePaise < 0) throw new Error("Price cannot be negative");
@@ -59,7 +62,10 @@ export class CatalogService {
         pricePaise: Math.round(productData.pricePaise),
         stock: productData.stock !== null ? Math.max(0, Math.floor(productData.stock)) : null,
         isAvailable: productData.isAvailable,
-        image: productData.image !== undefined ? productData.image : existing.image
+        image: productData.image !== undefined ? productData.image : existing.image,
+        images: productData.images !== undefined ? productData.images : existing.images,
+        isFeatured: productData.isFeatured !== undefined ? productData.isFeatured : existing.isFeatured,
+        isBestSeller: productData.isBestSeller !== undefined ? productData.isBestSeller : existing.isBestSeller
       };
     } else {
       p = {
@@ -72,6 +78,10 @@ export class CatalogService {
         stock: productData.stock !== null ? Math.max(0, Math.floor(productData.stock)) : null,
         isAvailable: productData.isAvailable,
         image: productData.image,
+        images: productData.images,
+        isFeatured: productData.isFeatured || false,
+        isBestSeller: productData.isBestSeller || false,
+        soldCount: 0,
         createdByUserId: session.userId,
         createdAt: Date.now()
       };

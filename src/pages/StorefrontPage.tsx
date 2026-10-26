@@ -10,6 +10,13 @@ import { BoldTheme } from "../themes/bold";
 import { formatPaise } from "../utils/money";
 import { generateQrSvg } from "../utils/qr";
 import { OrderHistory } from "../components/OrderHistory";
+import {
+  apiCreateOrder,
+  apiTrackOrder,
+  apiCustomerCancelOrder,
+  apiCustomerLogin,
+  apiCustomerRegister
+} from "../services/apiClient";
 
 interface Props {
   slug: string;
@@ -131,7 +138,8 @@ export const StorefrontPage: React.FC<Props> = ({
       else if (s.deliveryEnabled) setFulfilment("delivery");
 
       if (orderNumber) {
-        const ord = await defaultRepository.getOrderByNumber(s.id, orderNumber);
+        let ord = await apiTrackOrder(s.id, orderNumber);
+        if (!ord) ord = await defaultRepository.getOrderByNumber(s.id, orderNumber);
         setTrackedOrder(ord);
       }
 
@@ -183,7 +191,12 @@ export const StorefrontPage: React.FC<Props> = ({
     const handleCancelOrder = async () => {
       if (!trackedOrder || !customerSession) return;
       try {
-        const updated = await orderService.customerCancelOrder(customerSession.customerId, store.id, trackedOrder.id);
+        let updated: Order;
+        try {
+          updated = await apiCustomerCancelOrder(store.id, trackedOrder.id);
+        } catch {
+          updated = await orderService.customerCancelOrder(customerSession.customerId, store.id, trackedOrder.id);
+        }
         setTrackedOrder(updated);
       } catch (err: any) {
         alert(err.message || "Cannot cancel order");
@@ -361,13 +374,27 @@ export const StorefrontPage: React.FC<Props> = ({
     setCheckoutError(null);
 
     try {
-      const ord = await orderService.createQrOrder(store.id, {
-        customerName: counterName,
-        customerPhone: counterPhone,
-        note: counterNote,
-        referralCode: referralCode,
-        items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
-      });
+      let ord: Order;
+      try {
+        ord = await apiCreateOrder({
+          storeId: store.id,
+          source: "qr",
+          customerName: counterName,
+          customerPhone: counterPhone,
+          note: counterNote,
+          referralCode: referralCode,
+          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+        });
+      } catch {
+        ord = await orderService.createQrOrder(store.id, {
+          customerName: counterName,
+          customerPhone: counterPhone,
+          note: counterNote,
+          referralCode: referralCode,
+          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+        });
+      }
+
       recordOrderNumber(store.id, ord.number);
       setCompletedOrder(ord);
       setCart([]);
@@ -387,15 +414,32 @@ export const StorefrontPage: React.FC<Props> = ({
     setCheckoutError(null);
 
     try {
-      const ord = await orderService.createOnlineOrder(store.id, customerSession.customerId, {
-        fulfilment,
-        addressId: fulfilment === "delivery" ? selectedAddressId : undefined,
-        paymentMethod,
-        paymentReference: paymentRef,
-        note: onlineNote,
-        referralCode: referralCode,
-        items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
-      });
+      let ord: Order;
+      try {
+        ord = await apiCreateOrder({
+          storeId: store.id,
+          source: "online",
+          customerId: customerSession.customerId,
+          fulfilment,
+          addressId: fulfilment === "delivery" ? selectedAddressId : undefined,
+          paymentMethod,
+          paymentReference: paymentRef,
+          note: onlineNote,
+          referralCode: referralCode,
+          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+        });
+      } catch {
+        ord = await orderService.createOnlineOrder(store.id, customerSession.customerId, {
+          fulfilment,
+          addressId: fulfilment === "delivery" ? selectedAddressId : undefined,
+          paymentMethod,
+          paymentReference: paymentRef,
+          note: onlineNote,
+          referralCode: referralCode,
+          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+        });
+      }
+
       recordOrderNumber(store.id, ord.number);
       setCart([]);
       setIsCartOpen(false);
@@ -432,21 +476,31 @@ export const StorefrontPage: React.FC<Props> = ({
     setAuthError(null);
     try {
       if (authTab === "login") {
-        const cust = await customerService.login(store.id, authPhone, authPass);
-        onCustomerLogin({
-          customerId: cust.id,
-          storeId: store.id,
-          name: cust.name,
-          phone: cust.phone
-        });
+        try {
+          const custSession = await apiCustomerLogin(store.id, authPhone, authPass);
+          onCustomerLogin(custSession);
+        } catch {
+          const cust = await customerService.login(store.id, authPhone, authPass);
+          onCustomerLogin({
+            customerId: cust.id,
+            storeId: store.id,
+            name: cust.name,
+            phone: cust.phone
+          });
+        }
       } else {
-        const cust = await customerService.register(store.id, authName, authPhone, authPass);
-        onCustomerLogin({
-          customerId: cust.id,
-          storeId: store.id,
-          name: cust.name,
-          phone: cust.phone
-        });
+        try {
+          const custSession = await apiCustomerRegister(store.id, authName, authPhone, authPass);
+          onCustomerLogin(custSession);
+        } catch {
+          const cust = await customerService.register(store.id, authName, authPhone, authPass);
+          onCustomerLogin({
+            customerId: cust.id,
+            storeId: store.id,
+            name: cust.name,
+            phone: cust.phone
+          });
+        }
       }
     } catch (err: any) {
       setAuthError(err.message || "Authentication failed");

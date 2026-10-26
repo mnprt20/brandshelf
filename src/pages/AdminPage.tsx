@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Store, User } from "../types";
 import { defaultRepository } from "../repository/storage";
 
+import { apiAdminUpdateStore } from "../services/apiClient";
+
 interface Props {
   onNavigate: (route: string) => void;
   onSelectStoreSession: (storeId: string, userId: string, role: "owner" | "staff") => void;
@@ -10,6 +12,8 @@ interface Props {
 export const AdminPage: React.FC<Props> = ({ onNavigate, onSelectStoreSession }) => {
   const [stores, setStores] = useState<Store[]>([]);
   const [users, setUsers] = useState<Map<string, User>>(new Map());
+  const [adminKey, setAdminKey] = useState<string>("");
+  const [adminError, setAdminError] = useState<string | null>(null);
 
   const loadStores = async () => {
     const list = await defaultRepository.getAllStores();
@@ -27,15 +31,35 @@ export const AdminPage: React.FC<Props> = ({ onNavigate, onSelectStoreSession })
   }, []);
 
   const handleToggleActive = async (store: Store) => {
-    store.isActive = !store.isActive;
-    await defaultRepository.saveStore(store);
-    loadStores();
+    if (!adminKey.trim()) {
+      setAdminError("Please enter the server ADMIN_API_KEY above to modify store status.");
+      return;
+    }
+    setAdminError(null);
+    try {
+      await apiAdminUpdateStore(store.id, adminKey, { isActive: !store.isActive });
+      store.isActive = !store.isActive;
+      await defaultRepository.saveStore(store);
+      loadStores();
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to update store status");
+    }
   };
 
   const handlePlanChange = async (store: Store, newPlan: "offline" | "franchise" | "online") => {
-    store.planSlug = newPlan;
-    await defaultRepository.saveStore(store);
-    loadStores();
+    if (!adminKey.trim()) {
+      setAdminError("Please enter the server ADMIN_API_KEY above to change plan.");
+      return;
+    }
+    setAdminError(null);
+    try {
+      await apiAdminUpdateStore(store.id, adminKey, { planSlug: newPlan });
+      store.planSlug = newPlan;
+      await defaultRepository.saveStore(store);
+      loadStores();
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to change plan");
+    }
   };
 
   return (
@@ -43,6 +67,32 @@ export const AdminPage: React.FC<Props> = ({ onNavigate, onSelectStoreSession })
       <button onClick={() => onNavigate("#/")} style={{ background: "none", color: "var(--color-forest)", fontWeight: 600, fontSize: "14px", marginBottom: "16px" }}>
         ← Back to Landing Page
       </button>
+
+      {/* Admin Key Prompt (In-Memory Only) */}
+      <div style={{ background: "#FFFFFF", borderRadius: "16px", border: "1px solid #DCE3D6", padding: "16px 20px", marginBottom: "24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-forest)" }}>Admin API Key Required</div>
+          <div style={{ fontSize: "12px", color: "var(--color-muted)" }}>Changes to plan, seats, or active status require the server ADMIN_API_KEY (held in-memory only).</div>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <input
+            type="password"
+            value={adminKey}
+            onChange={e => {
+              setAdminKey(e.target.value);
+              setAdminError(null);
+            }}
+            placeholder="Enter ADMIN_API_KEY"
+            style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #DCE3D6", fontSize: "13px", width: "220px" }}
+          />
+        </div>
+      </div>
+
+      {adminError && (
+        <div style={{ background: "#FEE2E2", color: "#991B1B", padding: "10px 16px", borderRadius: "12px", fontSize: "13px", marginBottom: "20px", fontWeight: 600 }}>
+          {adminError}
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "28px" }}>
         <div>

@@ -69,6 +69,10 @@ export interface Product {
   stock: number | null;
   isAvailable: boolean;
   image?: string;
+  images?: string[];
+  isFeatured?: boolean;
+  isBestSeller?: boolean;
+  soldCount?: number;
   createdByUserId: string;
   createdAt: number;
 }
@@ -99,6 +103,7 @@ export interface OrderItemSnapshot {
   nameSnapshot: string;
   unitPricePaise: number;
   quantity: number;
+  note?: string;
 }
 
 export interface Order {

@@ -75,8 +75,6 @@ export const SettingsTab: React.FC<Props> = ({ session }) => {
         brandColor,
         themeKey,
         upiId,
-        planSlug,
-        extraSeats: Number(extraSeats),
         onlineOpen,
         pickupEnabled,
         deliveryEnabled,
@@ -205,15 +203,20 @@ export const SettingsTab: React.FC<Props> = ({ session }) => {
 
         {/* Plan & Seats Configuration Card */}
         <div style={{ background: "#FFFFFF", borderRadius: "20px", border: "1px solid #E5EADF", padding: "28px" }}>
-          <h3 style={{ fontSize: "18px", fontWeight: 700, margin: "0 0 16px" }}>Subscription Plan & Seats</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>Subscription Plan & Seats</h3>
+            <span style={{ fontSize: "12px", color: "var(--color-muted)", background: "#F5F8EF", padding: "4px 10px", borderRadius: "9999px" }}>
+              Managed by Platform Admin
+            </span>
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>Active Plan</label>
               <select
+                disabled
                 value={planSlug}
-                onChange={e => setPlanSlug(e.target.value as any)}
-                style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px" }}
+                style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px", background: "#F9FAF8", cursor: "not-allowed" }}
               >
                 <option value="offline">Offline Catalogue</option>
                 <option value="franchise">Franchise (Team logins & referrals)</option>
@@ -224,11 +227,11 @@ export const SettingsTab: React.FC<Props> = ({ session }) => {
             <div>
               <label style={{ display: "block", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>Extra Seats Added</label>
               <input
+                disabled
                 type="number"
                 min="0"
                 value={extraSeats}
-                onChange={e => setExtraSeats(parseInt(e.target.value, 10) || 0)}
-                style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px" }}
+                style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px", background: "#F9FAF8", cursor: "not-allowed" }}
               />
             </div>
           </div>

@@ -6,21 +6,28 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Helper functions
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    function hasTokenRole(role) {
+      return isSignedIn() && request.auth.token.role == role;
+    }
+
+    function isStoreOwner(storeId) {
+      return hasTokenRole('owner') && request.auth.token.storeId == storeId;
+    }
+
+    function isStoreStaff(storeId) {
+      return hasTokenRole('staff') && request.auth.token.storeId == storeId;
+    }
+
+    function isCustomer() {
+      return hasTokenRole('customer');
     }
 
     // Connection testing doc
@@ -28,71 +35,90 @@ service cloud.firestore {
       allow read: if true;
     }
 
-    // Stores collection (public catalogues and store configs)
+    // STORES: public get and list. Client update allowed only if owner of this store
+    // and affectedKeys do NOT include planSlug, extraSeats, isActive, ownerUserId, id, createdAt.
+    // No client create or delete.
     match /stores/{storeId} {
       allow get: if isValidId(storeId);
       allow list: if true;
-      allow create: if isValidId(storeId);
-      allow update: if isValidId(storeId);
+      allow create: if false;
       allow delete: if false;
+      allow update: if isValidId(storeId)
+        && isStoreOwner(storeId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'planSlug', 'extraSeats', 'isActive', 'ownerUserId', 'id', 'createdAt'
+        ]);
 
-      // Categories subcollection
+      // Meta docs: server/Admin SDK only
+      match /meta/{docId} {
+        allow read, write: if false;
+      }
+
+      // Categories: public read. Client write only if store owner.
       match /categories/{categoryId} {
-        allow read: if true;
-        allow create, update: if isValidId(categoryId);
-        allow delete: if isValidId(categoryId);
+        allow read: if isValidId(categoryId);
+        allow create, update, delete: if isValidId(categoryId) && isStoreOwner(storeId);
       }
 
-      // Products subcollection
+      // Products: public read. Client write only if store owner (soldCount is protected from client edits).
       match /products/{productId} {
-        allow read: if true;
-        allow create, update: if isValidId(productId);
-        allow delete: if isValidId(productId);
+        allow read: if isValidId(productId);
+        allow create: if isValidId(productId) && isStoreOwner(storeId) && (!('soldCount' in request.resource.data) || request.resource.data.soldCount == 0);
+        allow update: if isValidId(productId) && isStoreOwner(storeId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['soldCount']);
+        allow delete: if isValidId(productId) && isStoreOwner(storeId);
       }
 
-      // Orders subcollection
+      // Orders: no client write. Read allowed if:
+      // (a) owner of that store,
+      // (b) staff of that store and resource.data.placedByUserId == request.auth.token.userId, or
+      // (c) customer with resource.data.customerId == request.auth.token.customerId
       match /orders/{orderId} {
-        allow read: if true;
-        allow create: if isValidId(orderId);
-        allow update: if isValidId(orderId);
-        allow delete: if false;
+        allow write: if false;
+        allow get, list: if isValidId(orderId) && (
+          isStoreOwner(storeId)
+          || (isStoreStaff(storeId) && resource.data.placedByUserId == request.auth.token.userId)
+          || (isCustomer() && resource.data.customerId == request.auth.token.customerId)
+        );
 
         match /events/{eventId} {
-          allow read: if true;
-          allow create, update: if isValidId(eventId);
-          allow delete: if false;
+          allow write: if false;
+          allow get, list: if isValidId(eventId) && (
+            isStoreOwner(storeId)
+            || isStoreStaff(storeId)
+            || isCustomer()
+          );
         }
       }
     }
 
-    // Merchant Users
+    // Server-only collections: users, customers, memberships, aiMessages, pendingActions, aiUsage
+    // NO client read or write (server/Admin SDK only). passwordHash and salt never reach the browser.
     match /users/{userId} {
-      allow get: if isValidId(userId);
-      allow list: if true;
-      allow create, update: if isValidId(userId);
-      allow delete: if false;
+      allow read, write: if false;
     }
 
-    // Store Memberships
-    match /memberships/{membershipId} {
-      allow get: if isValidId(membershipId);
-      allow list: if true;
-      allow create, update: if isValidId(membershipId);
-      allow delete: if isValidId(membershipId);
-    }
-
-    // Customer accounts
     match /customers/{customerId} {
-      allow get: if isValidId(customerId);
-      allow list: if true;
-      allow create, update: if isValidId(customerId);
-      allow delete: if false;
+      allow read, write: if false;
 
-      // Saved delivery addresses
       match /addresses/{addressId} {
-        allow read: if isValidId(customerId);
-        allow write: if isValidId(customerId) && isValidId(addressId);
+        allow read, write: if false;
       }
+    }
+
+    match /memberships/{membershipId} {
+      allow read, write: if false;
+    }
+
+    match /aiMessages/{messageId} {
+      allow read, write: if false;
+    }
+
+    match /pendingActions/{actionId} {
+      allow read, write: if false;
+    }
+
+    match /aiUsage/{usageId} {
+      allow read, write: if false;
     }
   }
 }

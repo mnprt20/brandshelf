@@ -7,6 +7,7 @@ import { ReportService } from "../../services/reportService";
 import { AgentService } from "../../agent/agentLoop";
 import { GeminiAdapter } from "../../agent/geminiAdapter";
 import { PLANS } from "../../config/constants";
+import { apiAiChat, apiAiConfirmAction } from "../../services/apiClient";
 
 interface Props {
   session: SessionContext;
@@ -56,7 +57,28 @@ export const AiAssistantTab: React.FC<Props> = ({ session }) => {
     setIsSending(true);
 
     try {
-      await agentService.handleUserMessage(session, content);
+      try {
+        const resp = await apiAiChat(session.storeId, content);
+        setQuotaCount(resp.quotaUsed);
+        await defaultRepository.saveAiMessage({
+          id: "msg_" + Math.random().toString(36).substring(2, 9),
+          storeId: session.storeId,
+          userId: session.userId,
+          role: "user",
+          content,
+          timestamp: Date.now()
+        });
+        await defaultRepository.saveAiMessage({
+          id: "msg_" + Math.random().toString(36).substring(2, 9),
+          storeId: session.storeId,
+          userId: session.userId,
+          role: "assistant",
+          content: resp.text,
+          timestamp: Date.now()
+        });
+      } catch {
+        await agentService.handleUserMessage(session, content);
+      }
       await loadData();
     } catch (err: any) {
       alert("Error sending message: " + err.message);
@@ -67,7 +89,11 @@ export const AiAssistantTab: React.FC<Props> = ({ session }) => {
 
   const handleConfirmAction = async (actionId: string) => {
     try {
-      await agentService.confirmPendingAction(session, actionId);
+      try {
+        await apiAiConfirmAction(session.storeId, actionId);
+      } catch {
+        await agentService.confirmPendingAction(session, actionId);
+      }
       alert("Action confirmed and applied to your shop!");
       await loadData();
     } catch (err: any) {

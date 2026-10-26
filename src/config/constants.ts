@@ -12,6 +12,7 @@ export interface PlanDefinition {
   tagline: string;
   maxUsersIncluded: number;
   aiDailyQuota: number;
+  imageDailyQuota: number;
   features: string[];
 }
 
@@ -22,6 +23,7 @@ export const PLANS: Record<"offline" | "franchise" | "online", PlanDefinition> =
     tagline: "For boutique counters & solo shops",
     maxUsersIncluded: 1,
     aiDailyQuota: 30,
+    imageDailyQuota: 5,
     features: [
       "Max 1 user (owner only)",
       "Public catalogue & store QR code",
@@ -35,6 +37,7 @@ export const PLANS: Record<"offline" | "franchise" | "online", PlanDefinition> =
     tagline: "For stores with floor teams and affiliates",
     maxUsersIncluded: 2,
     aiDailyQuota: 100,
+    imageDailyQuota: 20,
     features: [
       "2 users included + expandable seats",
       "Staff logins with personal QR codes",
@@ -49,6 +52,7 @@ export const PLANS: Record<"offline" | "franchise" | "online", PlanDefinition> =
     tagline: "For modern full-service digital businesses",
     maxUsersIncluded: 5,
     aiDailyQuota: 300,
+    imageDailyQuota: 50,
     features: [
       "Everything in Franchise",
       "5 users included + expandable seats",

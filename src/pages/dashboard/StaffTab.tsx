@@ -4,6 +4,7 @@ import { defaultRepository } from "../../repository/storage";
 import { AuthService } from "../../services/authService";
 import { PLANS } from "../../config/constants";
 import { formatPaise } from "../../utils/money";
+import { apiAddStaff, apiUpdateStaff, apiResetStaffPassword, apiSetStaffActive } from "../../services/apiClient";
 
 interface Props {
   session: SessionContext;
@@ -125,11 +126,19 @@ export const StaffTab: React.FC<Props> = ({ session }) => {
     setSavingAdd(true);
     try {
       const finalUsername = username.trim() || (await authService.generateStaffUsername(store.name, displayName));
-      const newUser = await authService.addStaff(session, {
-        username: finalUsername,
-        displayName: displayName.trim(),
-        password
-      });
+      let newUser: any;
+
+      try {
+        const res = await apiAddStaff(session.storeId, displayName.trim(), password, finalUsername);
+        newUser = res.user;
+      } catch {
+        newUser = await authService.addStaff(session, {
+          username: finalUsername,
+          displayName: displayName.trim(),
+          password
+        });
+      }
+
       setIsAddModalOpen(false);
       setDisplayName("");
       setUsername("");
@@ -150,10 +159,17 @@ export const StaffTab: React.FC<Props> = ({ session }) => {
     setEditError(null);
     setSavingEdit(true);
     try {
-      await authService.updateStaff(session, editingStaff.userId, {
-        displayName: editingStaff.displayName,
-        username: editingStaff.username
-      });
+      try {
+        await apiUpdateStaff(editingStaff.userId, {
+          displayName: editingStaff.displayName,
+          username: editingStaff.username
+        });
+      } catch {
+        await authService.updateStaff(session, editingStaff.userId, {
+          displayName: editingStaff.displayName,
+          username: editingStaff.username
+        });
+      }
       setEditingStaff(null);
       loadData();
     } catch (err: any) {
@@ -169,7 +185,11 @@ export const StaffTab: React.FC<Props> = ({ session }) => {
     setResetError(null);
     setSavingReset(true);
     try {
-      await authService.resetStaffPassword(session, resetStaff.userId, newPassword);
+      try {
+        await apiResetStaffPassword(resetStaff.userId, newPassword);
+      } catch {
+        await authService.resetStaffPassword(session, resetStaff.userId, newPassword);
+      }
       setResetSuccess(`Password for @${resetStaff.username} has been reset successfully!`);
       setTimeout(() => {
         setResetStaff(null);
@@ -186,7 +206,11 @@ export const StaffTab: React.FC<Props> = ({ session }) => {
 
   const handleToggleStaffActive = async (userId: string, currentActive: boolean) => {
     try {
-      await authService.setStaffActive(session, userId, !currentActive);
+      try {
+        await apiSetStaffActive(userId, session.storeId, !currentActive);
+      } catch {
+        await authService.setStaffActive(session, userId, !currentActive);
+      }
       loadData();
     } catch (err: any) {
       alert(err.message || "Failed to toggle status");

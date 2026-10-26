@@ -11,6 +11,7 @@ export const BoldTheme: React.FC<ThemeSharedProps> = ({
   cartCount,
   onOpenCart,
   onAddToCart,
+  onSelectProduct,
   isDemo,
   onOpenOrderHistory,
   orderCount
@@ -79,7 +80,19 @@ export const BoldTheme: React.FC<ThemeSharedProps> = ({
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "28px" }}>
             {filtered.map(p => (
-              <div key={p.id} style={{ background: "#162016", borderRadius: "24px", overflow: "hidden", border: "1px solid #223322", display: "flex", flexDirection: "column" }}>
+              <div
+                key={p.id}
+                onClick={() => onSelectProduct?.(p)}
+                style={{
+                  background: "#162016",
+                  borderRadius: "24px",
+                  overflow: "hidden",
+                  border: "1px solid #223322",
+                  display: "flex",
+                  flexDirection: "column",
+                  cursor: onSelectProduct ? "pointer" : "default"
+                }}
+              >
                 <div style={{ height: "200px", background: "#1E2B1E", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {p.image ? (
                     <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -94,8 +107,11 @@ export const BoldTheme: React.FC<ThemeSharedProps> = ({
                     <span style={{ fontSize: "22px", fontWeight: 900, color: "#9EE493" }}>{formatPaise(p.pricePaise)}</span>
                     <button
                       disabled={isDemo || (p.stock !== null && p.stock <= 0)}
-                      onClick={() => onAddToCart(p)}
-                      style={{ background: "#9EE493", color: "#0C120C", padding: "12px 20px", borderRadius: "14px", fontWeight: 800, fontSize: "14px", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(p);
+                      }}
+                      style={{ background: "#9EE493", color: "#0C120C", padding: "12px 20px", borderRadius: "14px", fontWeight: 800, fontSize: "14px", border: "none", cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
                     >
                       {p.stock !== null && p.stock <= 0 ? "SOLD OUT" : "GRAB IT"}
                     </button>

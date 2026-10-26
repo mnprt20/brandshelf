@@ -5,6 +5,7 @@ import { defaultRepository } from "../repository/storage";
 import { SessionContext } from "../types";
 import { BRAND_TYPES, BrandTypeDefinition } from "../config/brandTypes";
 import { THEME_REGISTRY } from "../themes/registry";
+import { apiSignup } from "../services/apiClient";
 
 interface Props {
   onNavigate: (route: string) => void;
@@ -82,23 +83,33 @@ export const SignupPage: React.FC<Props> = ({ onNavigate, onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      const auth = new AuthService(defaultRepository);
-      const catalog = new CatalogService(defaultRepository);
       const brandDef = BRAND_TYPES[selectedBrandTypeId] || BRAND_TYPES.custom;
+      let session: SessionContext;
 
-      // 1. Create user and store with brand metadata
-      const { user, store } = await auth.signup(username, password, displayName, storeName, {
-        brandType: selectedBrandTypeId,
-        themeKey: selectedThemeKey,
-        brandColor: selectedBrandColor,
-        description: brandDef.tagline
-      });
+      try {
+        const res = await apiSignup(username, password, displayName, storeName, {
+          brandType: selectedBrandTypeId,
+          themeKey: selectedThemeKey,
+          brandColor: selectedBrandColor,
+          description: brandDef.tagline
+        });
+        session = res.session;
+      } catch {
+        const auth = new AuthService(defaultRepository);
+        const { user, store } = await auth.signup(username, password, displayName, storeName, {
+          brandType: selectedBrandTypeId,
+          themeKey: selectedThemeKey,
+          brandColor: selectedBrandColor,
+          description: brandDef.tagline
+        });
+        session = {
+          userId: user.id,
+          storeId: store.id,
+          role: "owner"
+        };
+      }
 
-      const session: SessionContext = {
-        userId: user.id,
-        storeId: store.id,
-        role: "owner"
-      };
+      const catalog = new CatalogService(defaultRepository);
 
       // 2. Create the recommended categories
       const categoryMap = new Map<string, string>(); // categoryName -> categoryId

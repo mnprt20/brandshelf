@@ -91,8 +91,6 @@ export class StoreService {
     if (update.deliveryNote !== undefined) store.deliveryNote = update.deliveryNote;
     if (update.acceptUpiQr !== undefined) store.acceptUpiQr = !!update.acceptUpiQr;
     if (update.acceptCod !== undefined) store.acceptCod = !!update.acceptCod;
-    if (update.extraSeats !== undefined) store.extraSeats = Math.max(0, update.extraSeats);
-    if (update.planSlug !== undefined) store.planSlug = update.planSlug;
 
     await this.repo.saveStore(store);
     return store;

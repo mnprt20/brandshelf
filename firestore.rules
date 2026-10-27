@@ -60,6 +60,13 @@ service cloud.firestore {
         allow create, update, delete: if isValidId(categoryId) && isStoreOwner(storeId);
       }
 
+      // Store Profile modules (info, policies, announcement, story): public get, owner-only write
+      match /profile/{profileDoc} {
+        allow get: if isValidId(profileDoc);
+        allow list: if true;
+        allow write: if isValidId(profileDoc) && isStoreOwner(storeId);
+      }
+
       // Products: public read. Client write only if store owner (soldCount is protected from client edits).
       match /products/{productId} {
         allow read: if isValidId(productId);

@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { PROJECT_NAME, PLAN_PRICES, PLANS } from "../config/constants";
-import { CurvedVideoCarousel } from "../components/CurvedVideoCarousel";
 import { THEME_REGISTRY } from "../themes/registry";
 import { HERO_CAROUSEL_PRODUCTS } from "../config/carouselProducts";
+
+const CurvedVideoCarousel = React.lazy(() =>
+  import("../components/CurvedVideoCarousel").then(m => ({ default: m.CurvedVideoCarousel }))
+);
 
 interface Props {
   onNavigate: (route: string) => void;
@@ -312,7 +315,9 @@ export const LandingPage: React.FC<Props> = ({ onNavigate }) => {
             </div>
 
             {/* CURVED VIDEO CAROUSEL */}
-            <CurvedVideoCarousel scaleUnit={1} />
+            <React.Suspense fallback={<div style={{ height: "480px" }} />}>
+              <CurvedVideoCarousel scaleUnit={1} />
+            </React.Suspense>
 
             {/* CTA Buttons */}
             <div style={{ position: "absolute", top: "895px", left: "50%", transform: "translateX(-50%)", zIndex: 30, display: "flex", flexDirection: "column", alignItems: "center" }}>

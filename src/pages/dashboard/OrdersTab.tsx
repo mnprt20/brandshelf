@@ -285,7 +285,15 @@ export const OrdersTab: React.FC<Props> = ({ session }) => {
               {selectedOrder.items.map((it, i) => (
                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "13px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>{it.nameSnapshot} <b>× {it.quantity}</b></span>
+                    <span>
+                      {it.nameSnapshot}
+                      {it.variantLabel && (
+                        <span style={{ color: "var(--color-muted)", fontWeight: 500, marginLeft: "4px" }}>
+                          ({it.variantLabel})
+                        </span>
+                      )}{" "}
+                      <b>× {it.quantity}</b>
+                    </span>
                     <span style={{ fontWeight: 600 }}>{formatPaise(it.unitPricePaise * it.quantity)}</span>
                   </div>
                   {it.note && (

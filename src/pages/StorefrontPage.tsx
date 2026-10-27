@@ -10,6 +10,8 @@ import { BoldTheme } from "../themes/bold";
 import { formatPaise } from "../utils/money";
 import { generateQrSvg } from "../utils/qr";
 import { OrderHistory } from "../components/OrderHistory";
+import { ProductDetailModal } from "../components/storefront/ProductDetailModal";
+import { useCart } from "../state/cart";
 import {
   apiCreateOrder,
   apiTrackOrder,
@@ -17,6 +19,13 @@ import {
   apiCustomerLogin,
   apiCustomerRegister
 } from "../services/apiClient";
+import { useT } from "../i18n/useT";
+import { ensureContrast } from "../utils/contrast";
+import { StoreProfile } from "../types";
+import { profileService } from "../services/profileService";
+import { StorefrontControls, ThemeMode, TextSize } from "../components/storefront/StorefrontControls";
+import { StorefrontBanner } from "../components/storefront/StorefrontBanner";
+import { StoreProfileSections } from "../components/storefront/StoreProfileSections";
 
 interface Props {
   slug: string;
@@ -47,9 +56,46 @@ export const StorefrontPage: React.FC<Props> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  // i18n, Profile, Display & Offline State
+  const { t, language, setLanguage, fontFamily } = useT();
+  const [profile, setProfile] = useState<StoreProfile | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== "undefined" ? navigator.onLine : true));
+
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    try {
+      const stored = localStorage.getItem("mintshelf_theme_mode") as ThemeMode;
+      if (stored === "light" || stored === "dark" || stored === "system") return stored;
+    } catch {}
+    return "system";
+  });
+
+  const [textSize, setTextSize] = useState<TextSize>(() => {
+    try {
+      const stored = localStorage.getItem("mintshelf_text_size") as TextSize;
+      if (stored === "normal" || stored === "large" || stored === "xlarge") return stored;
+    } catch {}
+    return "normal";
+  });
+
+  const localizedProducts = React.useMemo(() => {
+    return products.map(p => {
+      if (language === "en") return p;
+      const tr = p.translations?.[language];
+      if (tr && (tr.name || tr.description)) {
+        return {
+          ...p,
+          name: tr.name || p.name,
+          description: tr.description !== undefined ? tr.description : p.description
+        };
+      }
+      return p;
+    });
+  }, [products, language]);
 
   // Cart & Drawer
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const cartHook = useCart(store?.id || "", localizedProducts);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   // Order History state
@@ -143,11 +189,36 @@ export const StorefrontPage: React.FC<Props> = ({
         setTrackedOrder(ord);
       }
 
+      profileService.getProfile(s.id).then(setProfile).catch(() => {});
       await refreshOrderCount(s.id);
       setLoading(false);
     };
     load();
   }, [slug, orderNumber, refreshOrderCount]);
+
+  // Online / Offline Network Status Listener
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  // Dynamic Web App Manifest Link
+  useEffect(() => {
+    if (!store?.slug || typeof document === "undefined") return;
+    let link = document.querySelector<HTMLLinkElement>("link[rel='manifest']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "manifest";
+      document.head.appendChild(link);
+    }
+    link.href = `/manifest/${store.slug}.webmanifest`;
+  }, [store?.slug]);
 
   // Load customer addresses if logged in & refresh order count
   useEffect(() => {
@@ -284,7 +355,15 @@ export const StorefrontPage: React.FC<Props> = ({
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   {trackedOrder.items.map((it, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: "14px" }}>
-                      <span>{it.nameSnapshot} <b>× {it.quantity}</b></span>
+                      <span>
+                        {it.nameSnapshot}
+                        {it.variantLabel && (
+                          <span style={{ color: "var(--color-muted)", fontWeight: 500, marginLeft: "4px" }}>
+                            ({it.variantLabel})
+                          </span>
+                        )}{" "}
+                        <b>× {it.quantity}</b>
+                      </span>
                       <span style={{ fontWeight: 600 }}>{formatPaise(it.unitPricePaise * it.quantity)}</span>
                     </div>
                   ))}
@@ -329,35 +408,17 @@ export const StorefrontPage: React.FC<Props> = ({
   }
 
   // Cart operations
-  const handleAddToCart = (product: Product) => {
-    setCart(prev => {
-      const idx = prev.findIndex(item => item.product.id === product.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx].quantity += 1;
-        return next;
-      }
-      return [...prev, { product, quantity: 1 }];
-    });
+  const handleAddToCart = (product: Product, variantId?: string | null, variantLabel?: string) => {
+    if (product.variants && product.variants.length > 0 && !variantId) {
+      setSelectedProduct(product);
+      return;
+    }
+    cartHook.addToCart(product, 1, variantId || null, variantLabel);
     setIsCartOpen(true);
   };
 
-  const updateCartQty = (productId: string, delta: number) => {
-    setCart(prev => {
-      return prev
-        .map(item => {
-          if (item.product.id === productId) {
-            const newQty = item.quantity + delta;
-            return newQty > 0 ? { ...item, quantity: newQty } : null;
-          }
-          return item;
-        })
-        .filter(Boolean) as CartItem[];
-    });
-  };
-
-  const totalPaiseSubtotal = cart.reduce((sum, item) => sum + item.product.pricePaise * item.quantity, 0);
-  const totalItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const totalPaiseSubtotal = cartHook.totalPaiseSubtotal;
+  const totalItemCount = cartHook.totalItemCount;
 
   // Delivery fee calculation
   let deliveryFeePaise = 0;
@@ -369,11 +430,18 @@ export const StorefrontPage: React.FC<Props> = ({
   // Counter Checkout Submission (Offline / Franchise)
   const handleCounterCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0) return;
+    if (cartHook.lines.length === 0) return;
     setPlacingOrder(true);
     setCheckoutError(null);
 
     try {
+      const orderItems = cartHook.lines.map(i => ({
+        productId: i.productId,
+        variantId: i.variantId || undefined,
+        quantity: i.qty,
+        note: i.note || undefined
+      }));
+
       let ord: Order;
       try {
         ord = await apiCreateOrder({
@@ -383,7 +451,7 @@ export const StorefrontPage: React.FC<Props> = ({
           customerPhone: counterPhone,
           note: counterNote,
           referralCode: referralCode,
-          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+          items: orderItems
         });
       } catch {
         ord = await orderService.createQrOrder(store.id, {
@@ -391,13 +459,13 @@ export const StorefrontPage: React.FC<Props> = ({
           customerPhone: counterPhone,
           note: counterNote,
           referralCode: referralCode,
-          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+          items: orderItems
         });
       }
 
       recordOrderNumber(store.id, ord.number);
       setCompletedOrder(ord);
-      setCart([]);
+      cartHook.clearCart();
     } catch (err: any) {
       setCheckoutError(err.message || "Failed to place order");
     } finally {
@@ -408,12 +476,19 @@ export const StorefrontPage: React.FC<Props> = ({
   // Online Checkout Submission
   const handleOnlineCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0) return;
+    if (cartHook.lines.length === 0) return;
     if (!customerSession) return;
     setPlacingOrder(true);
     setCheckoutError(null);
 
     try {
+      const orderItems = cartHook.lines.map(i => ({
+        productId: i.productId,
+        variantId: i.variantId || undefined,
+        quantity: i.qty,
+        note: i.note || undefined
+      }));
+
       let ord: Order;
       try {
         ord = await apiCreateOrder({
@@ -426,7 +501,7 @@ export const StorefrontPage: React.FC<Props> = ({
           paymentReference: paymentRef,
           note: onlineNote,
           referralCode: referralCode,
-          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+          items: orderItems
         });
       } catch {
         ord = await orderService.createOnlineOrder(store.id, customerSession.customerId, {
@@ -436,12 +511,12 @@ export const StorefrontPage: React.FC<Props> = ({
           paymentReference: paymentRef,
           note: onlineNote,
           referralCode: referralCode,
-          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity }))
+          items: orderItems
         });
       }
 
       recordOrderNumber(store.id, ord.number);
-      setCart([]);
+      cartHook.clearCart();
       setIsCartOpen(false);
       onNavigate(`#/store/${slug}/order/${ord.number}`);
     } catch (err: any) {
@@ -452,21 +527,13 @@ export const StorefrontPage: React.FC<Props> = ({
   };
 
   // Re-order past order items into cart
-  const handleReorderItems = (items: { productId: string; quantity: number }[]) => {
-    setCart(prev => {
-      const next = [...prev];
-      for (const it of items) {
-        const prod = products.find(p => p.id === it.productId);
-        if (!prod) continue;
-        const existingIdx = next.findIndex(ci => ci.product.id === it.productId);
-        if (existingIdx >= 0) {
-          next[existingIdx].quantity += it.quantity;
-        } else {
-          next.push({ product: prod, quantity: it.quantity });
-        }
+  const handleReorderItems = (items: { productId: string; variantId?: string; variantLabel?: string; quantity: number }[]) => {
+    for (const it of items) {
+      const prod = products.find(p => p.id === it.productId);
+      if (prod) {
+        cartHook.addToCart(prod, it.quantity, it.variantId || null, it.variantLabel);
       }
-      return next;
-    });
+    }
     setIsCartOpen(true);
   };
 
@@ -530,26 +597,86 @@ export const StorefrontPage: React.FC<Props> = ({
     }
   };
 
-  // Render storefront through selected theme
+  const systemPrefersDark = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const isDark = themeMode === "dark" || (themeMode === "system" && systemPrefersDark);
+  const surfaceColor = isDark ? "#121412" : "#FFFFFF";
+  const surfaceBgColor = isDark ? "#181B18" : "#F9FAF6";
+  const textColor = isDark ? "#EDEFEA" : "#101410";
+  const textMutedColor = isDark ? "#A0A89C" : "#5E5E61";
+  const borderColor = isDark ? "#2A322A" : "#E5EADF";
+  const adjustedBrandColor = ensureContrast(store.brandColor || "#08482D", surfaceColor, 4.5);
+  const fontScalePercent = textSize === "large" ? "118%" : textSize === "xlarge" ? "135%" : "100%";
+
   const theme = resolveTheme(store.themeKey);
   const themeProps = {
-    store,
+    store: {
+      ...store,
+      brandColor: adjustedBrandColor
+    },
     categories,
-    products,
+    products: localizedProducts,
     activeCategoryId: activeCategory,
     onSelectCategory: setActiveCategory,
     cartCount: totalItemCount,
     onOpenCart: () => setIsCartOpen(true),
     onAddToCart: handleAddToCart,
+    onSelectProduct: (p: Product) => setSelectedProduct(p),
     onOpenOrderHistory: () => setIsOrderHistoryOpen(true),
     orderCount: orderCount
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div
+      style={{
+        position: "relative",
+        backgroundColor: surfaceBgColor,
+        color: textColor,
+        fontSize: fontScalePercent,
+        fontFamily: fontFamily || "inherit",
+        maxWidth: "100vw",
+        overflowX: "hidden"
+      }}
+    >
+      {/* Top Banner (Announcement + Offline status) */}
+      <StorefrontBanner
+        announcement={profile?.announcement}
+        isOnline={isOnline}
+        brandColor={adjustedBrandColor}
+      />
+
+      {/* Header Controls Bar (Language Switcher, Theme & Text Size Display Menu, PWA Install) */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          padding: "8px 16px",
+          backgroundColor: surfaceColor,
+          borderBottom: `1px solid ${borderColor}`,
+          gap: "10px"
+        }}
+      >
+        <StorefrontControls
+          language={language}
+          onSelectLanguage={setLanguage}
+          themeMode={themeMode}
+          onSelectThemeMode={mode => {
+            setThemeMode(mode);
+            try { localStorage.setItem("mintshelf_theme_mode", mode); } catch {}
+          }}
+          textSize={textSize}
+          onSelectTextSize={size => {
+            setTextSize(size);
+            try { localStorage.setItem("mintshelf_text_size", size); } catch {}
+          }}
+          brandColor={adjustedBrandColor}
+          isDark={isDark}
+        />
+      </div>
+
       {/* Referral Banner if active */}
       {referralCode && (
-        <div style={{ backgroundColor: store.brandColor, color: "#FFFFFF", padding: "8px 16px", textAlign: "center", fontSize: "13px", fontWeight: 600 }}>
+        <div style={{ backgroundColor: adjustedBrandColor, color: "#FFFFFF", padding: "8px 16px", textAlign: "center", fontSize: "13px", fontWeight: 600 }}>
           Assisted by Seller Code: <b>{referralCode}</b>
         </div>
       )}
@@ -562,6 +689,14 @@ export const StorefrontPage: React.FC<Props> = ({
       ) : (
         <ClassicTheme {...themeProps} />
       )}
+
+      {/* Profile Modules: Open/Closed IST Status, Call/WhatsApp, Story, Certs, Policies Footer */}
+      <StoreProfileSections
+        store={store}
+        profile={profile}
+        brandColor={adjustedBrandColor}
+        isDark={isDark}
+      />
 
       {/* Sticky Bottom Cart Bar for Mobile Viewports */}
       {totalItemCount > 0 && !isCartOpen && (
@@ -716,40 +851,66 @@ export const StorefrontPage: React.FC<Props> = ({
 
             {/* Cart Items List */}
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-              {cart.length === 0 ? (
+              {cartHook.reconcileNotice && (
+                <div style={{ background: "#FEF3C7", color: "#92400E", padding: "10px 14px", borderRadius: "12px", fontSize: "12px", marginBottom: "14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{cartHook.reconcileNotice}</span>
+                  <button onClick={cartHook.clearNotice} style={{ background: "none", border: "none", color: "#92400E", fontWeight: 700, cursor: "pointer", fontSize: "14px", padding: "0 4px" }}>✕</button>
+                </div>
+              )}
+
+              {cartHook.enrichedItems.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "48px 0", color: "var(--color-muted)" }}>
                   Your cart is empty.
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                  {cart.map(item => (
-                    <div key={item.product.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid #F0F4EC" }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: "15px" }}>{item.product.name}</div>
-                        <div style={{ color: "var(--color-muted)", fontSize: "13px" }}>{formatPaise(item.product.pricePaise)} each</div>
+                  {cartHook.enrichedItems.map(item => {
+                    const lineKey = `${item.productId}::${item.variantId || ""}`;
+                    const targetVariant = item.variantId ? item.product.variants?.find(v => v.id === item.variantId) : undefined;
+                    const maxStock = targetVariant ? targetVariant.stock : item.product.stock;
+                    const isAtMaxStock = maxStock !== null && maxStock !== undefined && item.quantity >= maxStock;
+                    return (
+                      <div key={lineKey} style={{ display: "flex", flexDirection: "column", gap: "6px", paddingBottom: "12px", borderBottom: "1px solid #F0F4EC" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ flex: 1, paddingRight: "10px" }}>
+                            <div style={{ fontWeight: 600, fontSize: "15px" }}>{item.product.name}</div>
+                            {item.variantLabel && (
+                              <div style={{ color: "var(--color-muted)", fontSize: "12px", fontWeight: 500, marginTop: "1px" }}>
+                                {item.variantLabel}
+                              </div>
+                            )}
+                            <div style={{ color: "var(--color-muted)", fontSize: "13px", marginTop: "2px" }}>
+                              {formatPaise(item.unitPricePaise)} each
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <button
+                              onClick={() => cartHook.updateCartQty(item.productId, -1, item.variantId)}
+                              style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#F0F4EC", fontWeight: 700, fontSize: "14px", border: "none", cursor: "pointer" }}
+                            >
+                              −
+                            </button>
+                            <span style={{ fontWeight: 600, fontSize: "14px", minWidth: "18px", textAlign: "center" }}>{item.quantity}</span>
+                            <button
+                              onClick={() => cartHook.updateCartQty(item.productId, 1, item.variantId)}
+                              disabled={isAtMaxStock}
+                              style={{ width: "28px", height: "28px", borderRadius: "50%", background: isAtMaxStock ? "#E5E7EB" : "#F0F4EC", color: isAtMaxStock ? "#9CA3AF" : "inherit", fontWeight: 700, fontSize: "14px", border: "none", cursor: isAtMaxStock ? "not-allowed" : "pointer" }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                        {isAtMaxStock && maxStock !== null && (
+                          <div style={{ fontSize: "11px", color: "#DC2626" }}>Only {maxStock} in stock</div>
+                        )}
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <button
-                          onClick={() => updateCartQty(item.product.id, -1)}
-                          style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#F0F4EC", fontWeight: 700, fontSize: "14px" }}
-                        >
-                          −
-                        </button>
-                        <span style={{ fontWeight: 600, fontSize: "14px", minWidth: "18px", textAlign: "center" }}>{item.quantity}</span>
-                        <button
-                          onClick={() => updateCartQty(item.product.id, 1)}
-                          style={{ width: "28px", height: "28px", borderRadius: "50%", background: "#F0F4EC", fontWeight: 700, fontSize: "14px" }}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
               {/* Checkout Form Area */}
-              {cart.length > 0 && (
+              {cartHook.enrichedItems.length > 0 && (
                 <div style={{ marginTop: "24px", paddingTop: "20px", borderTop: "2px solid #E5EADF" }}>
                   {checkoutError && (
                     <div style={{ background: "#FEE2E2", color: "#991B1B", padding: "10px 14px", borderRadius: "12px", fontSize: "13px", marginBottom: "16px", fontWeight: 500 }}>
@@ -808,10 +969,20 @@ export const StorefrontPage: React.FC<Props> = ({
 
                       <button
                         type="submit"
-                        disabled={placingOrder}
-                        style={{ marginTop: "12px", width: "100%", padding: "14px", borderRadius: "9999px", background: store.brandColor, color: "#FFFFFF", fontWeight: 700, fontSize: "15px" }}
+                        disabled={placingOrder || !isOnline}
+                        style={{
+                          marginTop: "12px",
+                          width: "100%",
+                          padding: "14px",
+                          borderRadius: "9999px",
+                          background: !isOnline ? "#9CA3AF" : adjustedBrandColor,
+                          color: "#FFFFFF",
+                          fontWeight: 700,
+                          fontSize: "15px",
+                          cursor: !isOnline ? "not-allowed" : "pointer"
+                        }}
                       >
-                        {placingOrder ? "Placing Order..." : `Confirm Order · ${formatPaise(grandTotalPaise)}`}
+                        {!isOnline ? "Ordering Offline Disabled" : placingOrder ? "Placing Order..." : `Confirm Order · ${formatPaise(grandTotalPaise)}`}
                       </button>
                     </form>
                   ) : (
@@ -1046,10 +1217,20 @@ export const StorefrontPage: React.FC<Props> = ({
 
                           <button
                             type="submit"
-                            disabled={placingOrder}
-                            style={{ marginTop: "8px", width: "100%", padding: "14px", borderRadius: "9999px", background: store.brandColor, color: "#FFFFFF", fontWeight: 700, fontSize: "15px" }}
+                            disabled={placingOrder || !isOnline}
+                            style={{
+                              marginTop: "8px",
+                              width: "100%",
+                              padding: "14px",
+                              borderRadius: "9999px",
+                              background: !isOnline ? "#9CA3AF" : adjustedBrandColor,
+                              color: "#FFFFFF",
+                              fontWeight: 700,
+                              fontSize: "15px",
+                              cursor: !isOnline ? "not-allowed" : "pointer"
+                            }}
                           >
-                            {placingOrder ? "Placing Order..." : `Place Order · ${formatPaise(grandTotalPaise)}`}
+                            {!isOnline ? "Ordering Offline Disabled" : placingOrder ? "Placing Order..." : `Place Order · ${formatPaise(grandTotalPaise)}`}
                           </button>
                         </form>
                       )}
@@ -1130,6 +1311,21 @@ export const StorefrontPage: React.FC<Props> = ({
           setIsOrderHistoryOpen(false);
           setIsCartOpen(true);
         }}
+      />
+
+      {/* Product Detail Modal */}
+      <ProductDetailModal
+        product={selectedProduct}
+        isOpen={!!selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+        onAddToCart={(product, quantity = 1, variantId, variantLabel) => {
+          cartHook.addToCart(product, quantity, variantId || null, variantLabel);
+          setIsCartOpen(true);
+          setSelectedProduct(null);
+        }}
+        storeId={store.id}
+        brandColor={store.brandColor}
+        categoryName={categories.find(c => c.id === selectedProduct?.categoryId)?.name}
       />
     </div>
   );

@@ -90,8 +90,16 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                  {p.image ? (
-                    <img src={p.image} alt={p.name} style={{ width: "64px", height: "64px", objectFit: "cover", borderRadius: "4px" }} />
+                  {(p.thumbs?.[0] || p.images?.[0] || p.image) ? (
+                    <img
+                      src={p.thumbs?.[0] || p.images?.[0] || p.image}
+                      alt={p.name}
+                      loading="lazy"
+                      decoding="async"
+                      width={64}
+                      height={64}
+                      style={{ width: "64px", height: "64px", objectFit: "cover", borderRadius: "4px", aspectRatio: "1/1" }}
+                    />
                   ) : (
                     <div style={{ width: "64px", height: "64px", background: "#F5F5F4", borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center" }}>🌾</div>
                   )}
@@ -101,17 +109,35 @@ export const MinimalTheme: React.FC<ThemeSharedProps> = ({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-                  <span style={{ fontSize: "15px", fontWeight: 600 }}>{formatPaise(p.pricePaise)}</span>
-                  <button
-                    disabled={isDemo || (p.stock !== null && p.stock <= 0)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAddToCart(p);
-                    }}
-                    style={{ border: `1px solid ${store.brandColor}`, color: store.brandColor, background: "#FFF", padding: "6px 14px", borderRadius: "2px", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
-                  >
-                    {p.stock !== null && p.stock <= 0 ? "Unavailable" : "+ Add"}
-                  </button>
+                  <span style={{ fontSize: "15px", fontWeight: 600 }}>
+                    {Array.isArray(p.variants) && p.variants.length > 0
+                      ? `From ${formatPaise(p.pricePaise)}`
+                      : formatPaise(p.pricePaise)}
+                  </span>
+                  {Array.isArray(p.variants) && p.variants.length > 0 ? (
+                    <button
+                      disabled={isDemo}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onSelectProduct) onSelectProduct(p);
+                        else onAddToCart(p);
+                      }}
+                      style={{ border: `1px solid ${store.brandColor}`, color: store.brandColor, background: "#FFF", padding: "6px 14px", borderRadius: "2px", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: isDemo ? "not-allowed" : "pointer" }}
+                    >
+                      Options
+                    </button>
+                  ) : (
+                    <button
+                      disabled={isDemo || (p.stock !== null && p.stock <= 0)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(p);
+                      }}
+                      style={{ border: `1px solid ${store.brandColor}`, color: store.brandColor, background: "#FFF", padding: "6px 14px", borderRadius: "2px", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
+                    >
+                      {p.stock !== null && p.stock <= 0 ? "Unavailable" : "+ Add"}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

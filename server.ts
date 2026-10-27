@@ -723,40 +723,72 @@ app.post("/api/orders", async (req: Request, res: Response) => {
       // 4. Read Products and verify stock & prices atomically
       let subtotalPaise = 0;
       const snapshots: any[] = [];
-      const productUpdates: { ref: any; updateFields: any }[] = [];
+      const prodMap = new Map<string, { ref: any; data: any }>();
 
       for (const item of items) {
-        const prodRef = adminDb.doc(`stores/${storeId}/products/${item.productId}`);
-        const prodDoc = await t.get(prodRef);
-        if (!prodDoc.exists || !prodDoc.data()?.isAvailable) {
-          throw new Error("One or more products are unavailable");
-        }
-        const prod = prodDoc.data()!;
-        if (prod.stock !== null && prod.stock !== undefined && prod.stock < item.quantity) {
-          throw new Error(`Insufficient stock for ${prod.name}`);
+        let entry = prodMap.get(item.productId);
+        if (!entry) {
+          const prodRef = adminDb.doc(`stores/${storeId}/products/${item.productId}`);
+          const prodDoc = await t.get(prodRef);
+          if (!prodDoc.exists || !prodDoc.data()?.isAvailable) {
+            throw new Error("One or more products are unavailable");
+          }
+          entry = { ref: prodRef, data: prodDoc.data()! };
+          prodMap.set(item.productId, entry);
         }
 
-        const unitPricePaise = prod.pricePaise;
-        subtotalPaise += unitPricePaise * item.quantity;
+        const prod = entry.data;
         const cleanNote = item.note ? String(item.note).trim().replace(/[\x00-\x1F\x7F]/g, "").slice(0, 140) : undefined;
-        snapshots.push({
-          productId: prod.id,
-          nameSnapshot: prod.name,
-          unitPricePaise,
-          quantity: item.quantity,
-          ...(cleanNote ? { note: cleanNote } : {})
-        });
+        const hasVariants = Array.isArray(prod.variants) && prod.variants.length > 0;
 
-        const updateFields: any = {
-          soldCount: (prod.soldCount || 0) + item.quantity
-        };
-        if (prod.stock !== null && prod.stock !== undefined) {
-          updateFields.stock = prod.stock - item.quantity;
+        if (hasVariants) {
+          if (!item.variantId) {
+            throw new Error(`Please select an option for ${prod.name}`);
+          }
+          const vIdx = prod.variants.findIndex((v: any) => v.id === item.variantId);
+          if (vIdx < 0 || !prod.variants[vIdx].isAvailable) {
+            throw new Error(`Selected variant is unavailable for ${prod.name}`);
+          }
+          const variant = prod.variants[vIdx];
+          if (variant.stock !== null && variant.stock !== undefined && variant.stock < item.quantity) {
+            throw new Error(`Insufficient stock for ${prod.name} (${variant.label})`);
+          }
+
+          if (variant.stock !== null && variant.stock !== undefined) {
+            variant.stock = Math.max(0, variant.stock - item.quantity);
+          }
+
+          const unitPricePaise = variant.pricePaise;
+          subtotalPaise += unitPricePaise * item.quantity;
+          snapshots.push({
+            productId: prod.id,
+            nameSnapshot: prod.name,
+            unitPricePaise,
+            quantity: item.quantity,
+            ...(cleanNote ? { note: cleanNote } : {}),
+            variantId: variant.id,
+            variantLabel: variant.label
+          });
+        } else {
+          if (prod.stock !== null && prod.stock !== undefined && prod.stock < item.quantity) {
+            throw new Error(`Insufficient stock for ${prod.name}`);
+          }
+          if (prod.stock !== null && prod.stock !== undefined) {
+            prod.stock = Math.max(0, prod.stock - item.quantity);
+          }
+
+          const unitPricePaise = prod.pricePaise;
+          subtotalPaise += unitPricePaise * item.quantity;
+          snapshots.push({
+            productId: prod.id,
+            nameSnapshot: prod.name,
+            unitPricePaise,
+            quantity: item.quantity,
+            ...(cleanNote ? { note: cleanNote } : {})
+          });
         }
-        productUpdates.push({
-          ref: prodRef,
-          updateFields
-        });
+
+        prod.soldCount = (prod.soldCount || 0) + item.quantity;
       }
 
       // Online delivery calculations
@@ -820,8 +852,21 @@ app.post("/api/orders", async (req: Request, res: Response) => {
 
       // Perform atomic writes
       t.set(counterRef, { orderSeq: currentSeq }, { merge: true });
-      for (const pu of productUpdates) {
-        t.update(pu.ref, pu.updateFields);
+      for (const { ref, data } of prodMap.values()) {
+        const updates: any = {
+          soldCount: data.soldCount || 0
+        };
+        if (Array.isArray(data.variants) && data.variants.length > 0) {
+          updates.variants = data.variants;
+          const avail = data.variants.filter((v: any) => v.isAvailable);
+          const pool = avail.length > 0 ? avail : data.variants;
+          updates.pricePaise = Math.min(...pool.map((v: any) => v.pricePaise));
+        } else {
+          if (data.stock !== null && data.stock !== undefined) {
+            updates.stock = data.stock;
+          }
+        }
+        t.update(ref, updates);
       }
       const orderRef = adminDb.doc(`stores/${storeId}/orders/${orderId}`);
       t.set(orderRef, newOrder);
@@ -872,21 +917,49 @@ app.patch("/api/orders/:id/status", requireAuth, async (req: AuthenticatedReques
 
       // If cancelling, restore stock and decrement soldCount atomically exactly once
       if (newStatus === "cancelled" && order.status !== "cancelled") {
+        const prodCancelMap = new Map<string, { ref: any; data: any }>();
         for (const item of order.items) {
-          const prodRef = adminDb.doc(`stores/${storeId}/products/${item.productId}`);
-          const prodDoc = await t.get(prodRef);
-          if (prodDoc.exists) {
-            const p = prodDoc.data()!;
-            const updateFields: any = {};
-            if (p.stock !== null && p.stock !== undefined) {
-              updateFields.stock = p.stock + item.quantity;
+          let entry = prodCancelMap.get(item.productId);
+          if (!entry) {
+            const prodRef = adminDb.doc(`stores/${storeId}/products/${item.productId}`);
+            const prodDoc = await t.get(prodRef);
+            if (prodDoc.exists) {
+              entry = { ref: prodRef, data: prodDoc.data()! };
+              prodCancelMap.set(item.productId, entry);
             }
-            if (p.soldCount !== undefined && p.soldCount !== null) {
-              updateFields.soldCount = Math.max(0, p.soldCount - item.quantity);
+          }
+          if (!entry) continue;
+          const p = entry.data;
+
+          if (item.variantId && Array.isArray(p.variants)) {
+            const v = p.variants.find((variant: any) => variant.id === item.variantId);
+            if (v && v.stock !== null && v.stock !== undefined) {
+              v.stock = v.stock + item.quantity;
             }
-            if (Object.keys(updateFields).length > 0) {
-              t.update(prodRef, updateFields);
-            }
+          } else if (p.stock !== null && p.stock !== undefined) {
+            p.stock = p.stock + item.quantity;
+          }
+
+          if (p.soldCount !== undefined && p.soldCount !== null) {
+            p.soldCount = Math.max(0, p.soldCount - item.quantity);
+          }
+        }
+
+        for (const { ref, data } of prodCancelMap.values()) {
+          const updates: any = {};
+          if (Array.isArray(data.variants) && data.variants.length > 0) {
+            updates.variants = data.variants;
+            const avail = data.variants.filter((v: any) => v.isAvailable);
+            const pool = avail.length > 0 ? avail : data.variants;
+            updates.pricePaise = Math.min(...pool.map((v: any) => v.pricePaise));
+          } else if (data.stock !== null && data.stock !== undefined) {
+            updates.stock = data.stock;
+          }
+          if (data.soldCount !== undefined) {
+            updates.soldCount = data.soldCount;
+          }
+          if (Object.keys(updates).length > 0) {
+            t.update(ref, updates);
           }
         }
       }
@@ -964,21 +1037,49 @@ app.post("/api/orders/:id/cancel", requireAuth, async (req: AuthenticatedRequest
       }
 
       // Restore stock and decrement soldCount
+      const prodCancelMap = new Map<string, { ref: any; data: any }>();
       for (const item of order.items) {
-        const prodRef = adminDb.doc(`stores/${storeId}/products/${item.productId}`);
-        const prodDoc = await t.get(prodRef);
-        if (prodDoc.exists) {
-          const p = prodDoc.data()!;
-          const updateFields: any = {};
-          if (p.stock !== null && p.stock !== undefined) {
-            updateFields.stock = p.stock + item.quantity;
+        let entry = prodCancelMap.get(item.productId);
+        if (!entry) {
+          const prodRef = adminDb.doc(`stores/${storeId}/products/${item.productId}`);
+          const prodDoc = await t.get(prodRef);
+          if (prodDoc.exists) {
+            entry = { ref: prodRef, data: prodDoc.data()! };
+            prodCancelMap.set(item.productId, entry);
           }
-          if (p.soldCount !== undefined && p.soldCount !== null) {
-            updateFields.soldCount = Math.max(0, p.soldCount - item.quantity);
+        }
+        if (!entry) continue;
+        const p = entry.data;
+
+        if (item.variantId && Array.isArray(p.variants)) {
+          const v = p.variants.find((variant: any) => variant.id === item.variantId);
+          if (v && v.stock !== null && v.stock !== undefined) {
+            v.stock = v.stock + item.quantity;
           }
-          if (Object.keys(updateFields).length > 0) {
-            t.update(prodRef, updateFields);
-          }
+        } else if (p.stock !== null && p.stock !== undefined) {
+          p.stock = p.stock + item.quantity;
+        }
+
+        if (p.soldCount !== undefined && p.soldCount !== null) {
+          p.soldCount = Math.max(0, p.soldCount - item.quantity);
+        }
+      }
+
+      for (const { ref, data } of prodCancelMap.values()) {
+        const updates: any = {};
+        if (Array.isArray(data.variants) && data.variants.length > 0) {
+          updates.variants = data.variants;
+          const avail = data.variants.filter((v: any) => v.isAvailable);
+          const pool = avail.length > 0 ? avail : data.variants;
+          updates.pricePaise = Math.min(...pool.map((v: any) => v.pricePaise));
+        } else if (data.stock !== null && data.stock !== undefined) {
+          updates.stock = data.stock;
+        }
+        if (data.soldCount !== undefined) {
+          updates.soldCount = data.soldCount;
+        }
+        if (Object.keys(updates).length > 0) {
+          t.update(ref, updates);
         }
       }
 
@@ -1108,6 +1209,104 @@ app.get("/api/stores/:storeId/products/:productId/related", async (req: Request,
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
+});
+
+// POST /api/products/bulk (bulk CSV / JSON product import)
+app.post("/api/products/bulk", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const caller = req.user!;
+  if (caller.role !== "owner") {
+    return res.status(403).json({ error: "Only the store owner can perform bulk product updates." });
+  }
+  const storeId = caller.storeId;
+  const { items } = req.body;
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ error: "items array is required" });
+  }
+
+  const errors: { row: number; name?: string; error: string }[] = [];
+  let successCount = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const rowNum = i + 1;
+    try {
+      if (item.id) {
+        const prodRef = adminDb.doc(`stores/${storeId}/products/${item.id}`);
+        const prodDoc = await prodRef.get();
+        if (prodDoc.exists) {
+          const existing = prodDoc.data()!;
+          if (Array.isArray(existing.variants) && existing.variants.length > 0) {
+            errors.push({
+              row: rowNum,
+              name: existing.name,
+              error: "This product has variants; edit them in the dashboard"
+            });
+            continue;
+          }
+          const updates: any = {};
+          if (item.name) updates.name = String(item.name).trim();
+          if (item.description !== undefined) updates.description = String(item.description).trim();
+          if (typeof item.pricePaise === "number" && item.pricePaise >= 0) updates.pricePaise = Math.round(item.pricePaise);
+          if (item.stock !== undefined) updates.stock = item.stock !== null ? Math.max(0, Math.floor(Number(item.stock))) : null;
+          if (item.isAvailable !== undefined) updates.isAvailable = !!item.isAvailable;
+          if (item.categoryId) updates.categoryId = item.categoryId;
+          await prodRef.update(updates);
+          successCount++;
+          continue;
+        }
+      }
+
+      // If matching by name or creating new
+      if (item.name) {
+        const existingByNameSnap = await adminDb.collection(`stores/${storeId}/products`)
+          .where("name", "==", String(item.name).trim())
+          .limit(1)
+          .get();
+
+        if (!existingByNameSnap.empty) {
+          const existingDoc = existingByNameSnap.docs[0];
+          const existing = existingDoc.data();
+          if (Array.isArray(existing.variants) && existing.variants.length > 0) {
+            errors.push({
+              row: rowNum,
+              name: existing.name,
+              error: "This product has variants; edit them in the dashboard"
+            });
+            continue;
+          }
+          const updates: any = {};
+          if (item.description !== undefined) updates.description = String(item.description).trim();
+          if (typeof item.pricePaise === "number" && item.pricePaise >= 0) updates.pricePaise = Math.round(item.pricePaise);
+          if (item.stock !== undefined) updates.stock = item.stock !== null ? Math.max(0, Math.floor(Number(item.stock))) : null;
+          if (item.isAvailable !== undefined) updates.isAvailable = !!item.isAvailable;
+          await existingDoc.ref.update(updates);
+          successCount++;
+          continue;
+        }
+      }
+
+      // New product
+      const newProdId = "prod_" + crypto.randomBytes(6).toString("hex");
+      const newProd = {
+        id: newProdId,
+        storeId,
+        categoryId: item.categoryId || "",
+        name: String(item.name || "Untitled Product").trim(),
+        description: String(item.description || "").trim(),
+        pricePaise: typeof item.pricePaise === "number" ? Math.max(0, Math.round(item.pricePaise)) : 0,
+        stock: item.stock !== undefined && item.stock !== null ? Math.max(0, Math.floor(Number(item.stock))) : null,
+        isAvailable: item.isAvailable !== undefined ? !!item.isAvailable : true,
+        createdByUserId: caller.userId,
+        createdAt: Date.now()
+      };
+      await adminDb.doc(`stores/${storeId}/products/${newProdId}`).set(newProd);
+      successCount++;
+    } catch (err: any) {
+      errors.push({ row: rowNum, name: item.name, error: err.message });
+    }
+  }
+
+  return res.json({ success: true, processed: successCount, errors });
 });
 
 // ----------------------------------------------------
@@ -1557,6 +1756,256 @@ app.post("/api/ai/enhance-photo", requireAuth, async (req: AuthenticatedRequest,
   } catch (err: any) {
     console.error("enhance-photo unhandled error:", err);
     return res.status(500).json({ error: err.message || "Failed to enhance photo" });
+  }
+});
+
+// ----------------------------------------------------
+// AI PRODUCT TRANSLATION (Hindi & Punjabi)
+// ----------------------------------------------------
+app.post("/api/ai/translate-product", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const caller = req.user!;
+  if (caller.role !== "owner") {
+    return res.status(403).json({ error: "Only the store owner can translate products." });
+  }
+
+  const storeId = caller.storeId;
+  if (!storeId) {
+    return res.status(400).json({ error: "Store ID is required in session." });
+  }
+
+  const { name, description } = req.body;
+  if (!name || typeof name !== "string") {
+    return res.status(400).json({ error: "Product name is required." });
+  }
+
+  try {
+    const storeDoc = await adminDb.collection("stores").doc(storeId).get();
+    if (!storeDoc.exists) return res.status(404).json({ error: "Store not found." });
+    const store = storeDoc.data()!;
+
+    // Quota check
+    const plan = PLANS[store.planSlug as "offline" | "franchise" | "online"] || PLANS.offline;
+    const dailyQuota = plan.aiDailyQuota || 20;
+    const todayStr = new Date().toISOString().split("T")[0];
+    const usageRef = adminDb.doc(`stores/${storeId}/meta/aiUsage_${todayStr}`);
+    const usageDoc = await usageRef.get();
+    const currentCount = usageDoc.exists ? usageDoc.data()?.count || 0 : 0;
+
+    if (currentCount >= dailyQuota) {
+      return res.status(429).json({ error: `Daily AI quota reached (${dailyQuota}/${dailyQuota}).` });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+    });
+
+    const promptText = `You are a professional e-commerce product translator specializing in Indian commerce.
+Translate the following product name and description into Hindi (Devanagari script) and Punjabi (Gurmukhi script).
+Rules:
+- Preserve brand names, trademarks, and proper nouns (e.g., MintShelf, Amul, Nike, Sourdough, Croissant) or transcribe them naturally if standard.
+- Preserve all numbers, units of measurement (e.g. 500g, 1kg, 250ml, 1L, cm, inch), pack sizes, and pricing.
+- Keep the tone appealing, clear, and natural for Indian retail customers.
+- Plain text only, no markdown or HTML.
+
+Product Name: ${name}
+Product Description: ${description || "N/A"}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: promptText }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            hi: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING }
+              },
+              required: ["name", "description"]
+            },
+            pa: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING }
+              },
+              required: ["name", "description"]
+            }
+          },
+          required: ["hi", "pa"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+
+    // Increment usage quota
+    await usageRef.set({ count: currentCount + 1, dateStr: todayStr }, { merge: true });
+
+    return res.json({
+      hi: parsed.hi || { name, description: description || "" },
+      pa: parsed.pa || { name, description: description || "" },
+      quotaUsed: currentCount + 1,
+      quotaTotal: dailyQuota
+    });
+  } catch (err: any) {
+    console.error("translate-product error:", err);
+    return res.status(500).json({ error: err.message || "Failed to translate product." });
+  }
+});
+
+// ----------------------------------------------------
+// AI PROFILE COPY ASSISTANT
+// ----------------------------------------------------
+app.post("/api/ai/profile-assist", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const caller = req.user!;
+  if (caller.role !== "owner") {
+    return res.status(403).json({ error: "Only the store owner can use profile AI assist." });
+  }
+
+  const storeId = caller.storeId;
+  if (!storeId) {
+    return res.status(400).json({ error: "Store ID is required in session." });
+  }
+
+  const { module, field, storeName, category, currentText } = req.body;
+  if (!module || !field) {
+    return res.status(400).json({ error: "Module and field are required." });
+  }
+
+  try {
+    const storeDoc = await adminDb.collection("stores").doc(storeId).get();
+    if (!storeDoc.exists) return res.status(404).json({ error: "Store not found." });
+    const store = storeDoc.data()!;
+
+    // Quota check
+    const plan = PLANS[store.planSlug as "offline" | "franchise" | "online"] || PLANS.offline;
+    const dailyQuota = plan.aiDailyQuota || 20;
+    const todayStr = new Date().toISOString().split("T")[0];
+    const usageRef = adminDb.doc(`stores/${storeId}/meta/aiUsage_${todayStr}`);
+    const usageDoc = await usageRef.get();
+    const currentCount = usageDoc.exists ? usageDoc.data()?.count || 0 : 0;
+
+    if (currentCount >= dailyQuota) {
+      return res.status(429).json({ error: `Daily AI quota reached (${dailyQuota}/${dailyQuota}).` });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+    });
+
+    const systemInstruction = "You are a professional retail copywriter for independent Indian shops. Provide concise, polished, plain text copy. NEVER output HTML or markdown formatting.";
+    let prompt = "";
+
+    if (module === "announcement") {
+      prompt = `Write or improve a single store announcement banner for "${storeName || store.name}" (Business type: ${store.brandType || category || "General retail"}). Current text: "${currentText || ""}".
+Rules:
+- Under 140 characters.
+- Plain text only.
+- Direct, warm, customer-focused (e.g. fresh arrivals, holiday hours, special offer, delivery updates).`;
+    } else if (module === "story") {
+      prompt = `Write or improve the About / Brand Story for "${storeName || store.name}" (Business type: ${store.brandType || category || "General retail"}). Current draft: "${currentText || ""}".
+Rules:
+- Under 800 characters (max 1000).
+- Plain text only (paragraphs separated by single blank lines).
+- Highlight craftsmanship, dedication to quality, and community trust.
+- Do not invent false awards or founding dates not mentioned; if unknown, focus on passion and commitment.`;
+    } else if (module === "policies") {
+      prompt = `Generate a standard, clear, professional store policy for "${storeName || store.name}" for the section: "${field}" (returns, shipping, or privacy). Current text: "${currentText || ""}".
+Rules:
+- STRICT ANTI-HALLUCINATION: Do NOT invent specific delivery windows, refund days, return addresses, or phone numbers.
+- Any specific shop details that the merchant must customize MUST be clearly marked in uppercase brackets like [RETURN_WINDOW: e.g. 7 days], [SHIPPING_CHARGE: e.g. Rs 50], [CONTACT_EMAIL: e.g. contact@store.com], [DISPATCH_TIME: e.g. 24-48 hours].
+- Keep it under 2500 characters, plain text only.`;
+    } else {
+      prompt = `Provide assistance for field "${field}" in module "${module}" for store "${storeName || store.name}". Current text: "${currentText || ""}". Plain text only.`;
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction,
+        temperature: 0.3
+      }
+    });
+
+    const suggestion = (response.text || "").trim();
+
+    // Increment usage
+    await usageRef.set({ count: currentCount + 1, dateStr: todayStr }, { merge: true });
+
+    return res.json({
+      suggestion,
+      quotaUsed: currentCount + 1,
+      quotaTotal: dailyQuota
+    });
+  } catch (err: any) {
+    console.error("profile-assist error:", err);
+    return res.status(500).json({ error: err.message || "Failed to generate profile suggestion." });
+  }
+});
+
+// ----------------------------------------------------
+// DYNAMIC WEB APP MANIFEST
+// ----------------------------------------------------
+app.get("/manifest/:slug.webmanifest", async (req: Request, res: Response) => {
+  const { slug } = req.params;
+  try {
+    const snap = await adminDb.collection("stores").where("slug", "==", slug).limit(1).get();
+    let name = "MintShelf Store";
+    let shortName = "Store";
+    let themeColor = "#08482D";
+    const bgColor = "#ffffff";
+
+    if (!snap.empty) {
+      const store = snap.docs[0].data();
+      name = store.name || name;
+      shortName = (store.name || "").slice(0, 12);
+      themeColor = store.brandColor || themeColor;
+    }
+
+    const manifest = {
+      name,
+      short_name: shortName,
+      start_url: `/#/store/${slug}`,
+      scope: "/",
+      display: "standalone",
+      background_color: bgColor,
+      theme_color: themeColor,
+      icons: [
+        {
+          src: "/icon-192.png",
+          sizes: "192x192",
+          type: "image/png"
+        },
+        {
+          src: "/icon-512.png",
+          sizes: "512x512",
+          type: "image/png"
+        }
+      ]
+    };
+
+    res.setHeader("Content-Type", "application/manifest+json");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.json(manifest);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -112,15 +112,17 @@ export class ReportService {
       }
 
       for (const item of order.items) {
-        let pRow = productMap.get(item.productId);
+        const pKey = item.productId + (item.variantId ? `_${item.variantId}` : "");
+        let pRow = productMap.get(pKey);
         if (!pRow) {
+          const displayName = item.variantLabel ? `${item.nameSnapshot} (${item.variantLabel})` : item.nameSnapshot;
           pRow = {
-            productId: item.productId,
-            productName: item.nameSnapshot,
+            productId: pKey,
+            productName: displayName,
             unitsSold: 0,
             revenuePaise: 0
           };
-          productMap.set(item.productId, pRow);
+          productMap.set(pKey, pRow);
         }
         pRow.unitsSold += item.quantity;
         if (isPaidOrCompleted) {

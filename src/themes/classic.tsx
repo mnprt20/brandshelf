@@ -105,56 +105,94 @@ export const ClassicTheme: React.FC<ThemeSharedProps> = ({
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "20px" }}>
-            {filtered.map(p => (
-              <div
-                key={p.id}
-                onClick={() => onSelectProduct?.(p)}
-                style={{
-                  background: "#FFFFFF",
-                  borderRadius: "16px",
-                  border: "1px solid #E5EADF",
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                  cursor: onSelectProduct ? "pointer" : "default"
-                }}
-              >
-                <div style={{ height: "160px", backgroundColor: "#E9F0E1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {p.image ? (
-                    <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    <span style={{ fontSize: "36px" }}>📦</span>
-                  )}
-                </div>
+            {filtered.map((p, idx) => {
+              const displayImg = p.thumbs?.[0] || p.images?.[0] || p.image;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => onSelectProduct?.(p)}
+                  style={{
+                    background: "#FFFFFF",
+                    borderRadius: "16px",
+                    border: "1px solid #E5EADF",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    cursor: onSelectProduct ? "pointer" : "default"
+                  }}
+                >
+                  <div style={{ height: "160px", backgroundColor: "#E9F0E1", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {displayImg ? (
+                      <img
+                        src={displayImg}
+                        alt={p.name}
+                        loading={idx < 4 ? "eager" : "lazy"}
+                        decoding="async"
+                        width={280}
+                        height={160}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "16/9" }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: "36px" }}>📦</span>
+                    )}
+                  </div>
                 <div style={{ padding: "16px", flex: 1, display: "flex", flexDirection: "column" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 600, margin: "0 0 6px" }}>{p.name}</h3>
                   <p style={{ fontSize: "13px", color: "#5E5E61", margin: "0 0 12px", flex: 1 }}>{p.description}</p>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto" }}>
-                    <span style={{ fontSize: "18px", fontWeight: 700, color: store.brandColor }}>{formatPaise(p.pricePaise)}</span>
-                    <button
-                      disabled={isDemo || (p.stock !== null && p.stock <= 0)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddToCart(p);
-                      }}
-                      style={{
-                        background: store.brandColor,
-                        color: "#FFFFFF",
-                        padding: "8px 14px",
-                        borderRadius: "9999px",
-                        fontSize: "13px",
-                        fontWeight: 600,
-                        border: "none",
-                        cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer",
-                        opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1
-                      }}
-                    >
-                      {p.stock !== null && p.stock <= 0 ? "Out of stock" : "Add to Cart"}
-                    </button>
+                    <span style={{ fontSize: "18px", fontWeight: 700, color: store.brandColor }}>
+                      {Array.isArray(p.variants) && p.variants.length > 0
+                        ? `From ${formatPaise(p.pricePaise)}`
+                        : formatPaise(p.pricePaise)}
+                    </span>
+                    {Array.isArray(p.variants) && p.variants.length > 0 ? (
+                      <button
+                        disabled={isDemo}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectProduct) onSelectProduct(p);
+                          else onAddToCart(p);
+                        }}
+                        style={{
+                          background: store.brandColor,
+                          color: "#FFFFFF",
+                          padding: "8px 14px",
+                          borderRadius: "9999px",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          border: "none",
+                          cursor: isDemo ? "not-allowed" : "pointer"
+                        }}
+                      >
+                        Select Options
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isDemo || (p.stock !== null && p.stock <= 0)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddToCart(p);
+                        }}
+                        style={{
+                          background: store.brandColor,
+                          color: "#FFFFFF",
+                          padding: "8px 14px",
+                          borderRadius: "9999px",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          border: "none",
+                          cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer",
+                          opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1
+                        }}
+                      >
+                        {p.stock !== null && p.stock <= 0 ? "Out of stock" : "Add to Cart"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         )}
       </main>

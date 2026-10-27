@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from "react";
-import { Product } from "../../types";
+import React, { useState, useEffect, useMemo } from "react";
+import { Product, Variant } from "../../types";
 import { formatPaise } from "../../utils/money";
 import { ProductBadges } from "./Badges";
 import { recordRecentlyViewed } from "./RecentlyViewed";
+import { VariantPicker, findMatchingVariant } from "./VariantPicker";
 
 interface Props {
   product: Product | null;
   isOpen: boolean;
   onClose: () => void;
-  onAddToCart: (product: Product) => void;
+  onAddToCart: (product: Product, quantity?: number, variantId?: string | null, variantLabel?: string) => void;
   storeId?: string;
   brandColor?: string;
   categoryName?: string;
@@ -26,13 +27,34 @@ export const ProductDetailModal: React.FC<Props> = ({
   extraContent
 }) => {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setSelectedImageIndex(0);
+    setSelectedOptions({});
     if (product && storeId) {
       recordRecentlyViewed(storeId, product.id);
     }
   }, [product?.id, storeId]);
+
+  const hasVariants = Array.isArray(product?.variants) && product!.variants.length > 0;
+  const optionNames = useMemo(() => {
+    if (!product || !hasVariants) return [];
+    if (product.optionNames && product.optionNames.length > 0) return product.optionNames;
+    const s = new Set<string>();
+    product.variants?.forEach(v => Object.keys(v.options || {}).forEach(k => s.add(k)));
+    return Array.from(s);
+  }, [product, hasVariants]);
+
+  const selectedVariant = useMemo(() => {
+    if (!product || !hasVariants) return null;
+    return findMatchingVariant(product.variants, optionNames, selectedOptions);
+  }, [product, hasVariants, optionNames, selectedOptions]);
+
+  const allOptionsSelected = useMemo(() => {
+    if (!hasVariants) return true;
+    return optionNames.every(name => !!selectedOptions[name]);
+  }, [hasVariants, optionNames, selectedOptions]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -55,6 +77,13 @@ export const ProductDetailModal: React.FC<Props> = ({
     allImages.push(...product.images);
   } else if (product.image) {
     allImages.push(product.image);
+  }
+
+  const allThumbs: string[] = [];
+  if (Array.isArray(product.thumbs) && product.thumbs.length > 0) {
+    allThumbs.push(...product.thumbs);
+  } else {
+    allThumbs.push(...allImages);
   }
 
   const currentImage = allImages[selectedImageIndex] || product.image;
@@ -124,7 +153,11 @@ export const ProductDetailModal: React.FC<Props> = ({
               <img
                 src={currentImage}
                 alt={product.name}
-                style={{ width: "100%", height: "100%", objectFit: "contain", background: "#FFFFFF" }}
+                loading="eager"
+                decoding="async"
+                width={520}
+                height={300}
+                style={{ width: "100%", height: "100%", objectFit: "contain", background: "#FFFFFF", aspectRatio: "16/9" }}
               />
             ) : (
               <span style={{ fontSize: "64px" }}>📦</span>
@@ -150,7 +183,15 @@ export const ProductDetailModal: React.FC<Props> = ({
                     flexShrink: 0
                   }}
                 >
-                  <img src={img} alt={`${product.name} ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img
+                    src={allThumbs[idx] || img}
+                    alt={`${product.name} ${idx + 1}`}
+                    loading="lazy"
+                    decoding="async"
+                    width={52}
+                    height={52}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "1/1" }}
+                  />
                 </button>
               ))}
             </div>
@@ -172,26 +213,32 @@ export const ProductDetailModal: React.FC<Props> = ({
               {product.name}
             </h2>
             <div style={{ fontSize: "22px", fontWeight: 900, color: brandColor, whiteSpace: "nowrap" }}>
-              {formatPaise(product.pricePaise)}
+              {hasVariants
+                ? selectedVariant
+                  ? formatPaise(selectedVariant.pricePaise)
+                  : `From ${formatPaise(product.pricePaise)}`
+                : formatPaise(product.pricePaise)}
             </div>
           </div>
 
-          {/* Stock Tag */}
-          <div>
-            {isOutOfStock ? (
-              <span style={{ display: "inline-block", background: "#FEE2E2", color: "#991B1B", padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 700 }}>
-                Out of Stock
-              </span>
-            ) : product.stock !== null && product.stock <= 5 ? (
-              <span style={{ display: "inline-block", background: "#FEF3C7", color: "#92400E", padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 700 }}>
-                Only {product.stock} left in stock
-              </span>
-            ) : (
-              <span style={{ display: "inline-block", background: "#DCFCE7", color: "#166534", padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 700 }}>
-                In Stock
-              </span>
-            )}
-          </div>
+          {/* Stock Tag (for non-variant products) */}
+          {!hasVariants && (
+            <div>
+              {isOutOfStock ? (
+                <span style={{ display: "inline-block", background: "#FEE2E2", color: "#991B1B", padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 700 }}>
+                  Out of Stock
+                </span>
+              ) : product.stock !== null && product.stock <= 5 ? (
+                <span style={{ display: "inline-block", background: "#FEF3C7", color: "#92400E", padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 700 }}>
+                  Only {product.stock} left in stock
+                </span>
+              ) : (
+                <span style={{ display: "inline-block", background: "#DCFCE7", color: "#166534", padding: "3px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 700 }}>
+                  In Stock
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Description */}
           {product.description && (
@@ -200,38 +247,85 @@ export const ProductDetailModal: React.FC<Props> = ({
             </p>
           )}
 
+          {/* Variant Selector (if product has variants) */}
+          {hasVariants && (
+            <VariantPicker
+              product={product}
+              brandColor={brandColor}
+              selectedOptions={selectedOptions}
+              onChangeOption={(optName, val) => {
+                setSelectedOptions(prev => ({ ...prev, [optName]: val }));
+              }}
+              selectedVariant={selectedVariant}
+            />
+          )}
+
           {/* Extra Content (Related Products, Bought Together) */}
           {extraContent}
 
           {/* Action Row */}
-          <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid #E5EADF", display: "flex", gap: "12px" }}>
-            <button
-              onClick={() => {
-                onAddToCart(product);
-                onClose();
-              }}
-              disabled={isOutOfStock}
-              style={{
-                flex: 1,
-                padding: "14px 20px",
-                borderRadius: "9999px",
-                backgroundColor: isOutOfStock ? "#E2E8F0" : brandColor,
-                color: isOutOfStock ? "#94A3B8" : "#FFFFFF",
-                fontSize: "15px",
-                fontWeight: 700,
-                border: "none",
-                cursor: isOutOfStock ? "not-allowed" : "pointer",
-                boxShadow: isOutOfStock ? "none" : "0 4px 14px rgba(0, 0, 0, 0.15)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px"
-              }}
-            >
-              <span>🛒</span>
-              <span>{isOutOfStock ? "Out of Stock" : `Add to Cart • ${formatPaise(product.pricePaise)}`}</span>
-            </button>
-          </div>
+          {(() => {
+            let canAdd = false;
+            let buttonLabel = "";
+
+            if (hasVariants) {
+              if (!allOptionsSelected) {
+                canAdd = false;
+                buttonLabel = "Select Options";
+              } else if (!selectedVariant || !selectedVariant.isAvailable) {
+                canAdd = false;
+                buttonLabel = "Unavailable";
+              } else if (selectedVariant.stock !== null && selectedVariant.stock <= 0) {
+                canAdd = false;
+                buttonLabel = "Out of Stock";
+              } else {
+                canAdd = true;
+                buttonLabel = `Add to Cart • ${formatPaise(selectedVariant.pricePaise)}`;
+              }
+            } else {
+              canAdd = !isOutOfStock;
+              buttonLabel = isOutOfStock ? "Out of Stock" : `Add to Cart • ${formatPaise(product.pricePaise)}`;
+            }
+
+            return (
+              <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid #E5EADF", display: "flex", gap: "12px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (hasVariants) {
+                      if (selectedVariant) {
+                        onAddToCart(product, 1, selectedVariant.id, selectedVariant.label);
+                        onClose();
+                      }
+                    } else {
+                      onAddToCart(product, 1);
+                      onClose();
+                    }
+                  }}
+                  disabled={!canAdd}
+                  style={{
+                    flex: 1,
+                    padding: "14px 20px",
+                    borderRadius: "9999px",
+                    backgroundColor: !canAdd ? "#E2E8F0" : brandColor,
+                    color: !canAdd ? "#94A3B8" : "#FFFFFF",
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    border: "none",
+                    cursor: !canAdd ? "not-allowed" : "pointer",
+                    boxShadow: !canAdd ? "none" : "0 4px 14px rgba(0, 0, 0, 0.15)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px"
+                  }}
+                >
+                  <span>🛒</span>
+                  <span>{buttonLabel}</span>
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

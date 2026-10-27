@@ -1,6 +1,6 @@
 import { signInWithCustomToken } from "firebase/auth";
 import { auth } from "./firebase";
-import { SessionContext, CustomerSessionContext, Store, User, Order } from "../types";
+import { SessionContext, CustomerSessionContext, Store, User, Order, Product } from "../types";
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const user = auth.currentUser;
@@ -306,4 +306,56 @@ export async function apiGetRelatedProducts(storeId: string, productId: string):
   if (!res.ok) throw new Error(data.error || "Failed to fetch related products");
   return data;
 }
+
+// ---------------- BULK PRODUCT IMPORT ----------------
+export async function apiBulkImportProducts(items: any[]): Promise<{ success: boolean; processed: number; errors: { row: number; name?: string; error: string }[] }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch("/api/products/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ items })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Bulk import failed");
+  return data;
+}
+
+// ---------------- PRODUCT TRANSLATION ----------------
+export async function apiTranslateProduct(payload: { name: string; description?: string }): Promise<{
+  hi: { name: string; description: string };
+  pa: { name: string; description: string };
+  quotaUsed: number;
+  quotaTotal: number;
+}> {
+  const headers = await getAuthHeaders();
+  const res = await fetch("/api/ai/translate-product", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Product translation failed");
+  return data;
+}
+
+// ---------------- PROFILE AI ASSIST ----------------
+export async function apiProfileAssist(payload: {
+  module: "info" | "policies" | "announcement" | "story";
+  field: string;
+  storeName?: string;
+  category?: string;
+  currentText?: string;
+}): Promise<{ suggestion: string; quotaUsed: number; quotaTotal: number }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch("/api/ai/profile-assist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Profile AI assist failed");
+  return data;
+}
+
+
 

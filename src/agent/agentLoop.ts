@@ -299,6 +299,9 @@ Important security guidelines:
       if (toolName === "propose_price_change" && session.role === "owner") {
         const prod = await this.repo.getProductById(session.storeId, args.productId);
         if (!prod) return { error: "Product not found" };
+        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+          return { error: "This product has variants; edit them in the dashboard" };
+        }
         const price = Math.round(Number(args.newPricePaise));
         if (isNaN(price) || price < 0) return { error: "Invalid price" };
 
@@ -314,6 +317,9 @@ Important security guidelines:
       if (toolName === "propose_stock_update" && session.role === "owner") {
         const prod = await this.repo.getProductById(session.storeId, args.productId);
         if (!prod) return { error: "Product not found" };
+        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+          return { error: "This product has variants; edit them in the dashboard" };
+        }
         const stock = Math.max(0, Math.floor(Number(args.newStock)));
         const action = await this.createPendingAction(
           session,

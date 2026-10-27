@@ -59,3 +59,7 @@ export function compressDataUrl(dataUrl: string, maxDim = 1024, quality = 0.85):
   });
 }
 
+export function createThumbnail(dataUrl: string, maxDim = 400, quality = 0.75): Promise<string> {
+  return compressDataUrl(dataUrl, maxDim, quality);
+}
+

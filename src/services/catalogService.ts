@@ -1,5 +1,5 @@
 import { IRepository } from "../repository/types";
-import { Product, Category, SessionContext } from "../types";
+import { Product, Category, SessionContext, Variant } from "../types";
 
 export class CatalogService {
   constructor(private repo: IRepository) {}
@@ -44,11 +44,23 @@ export class CatalogService {
     isAvailable: boolean;
     image?: string;
     images?: string[];
+    thumbs?: string[];
+    translations?: { hi?: { name?: string; description?: string }; pa?: { name?: string; description?: string } };
+    optionNames?: string[];
+    variants?: Variant[];
     isFeatured?: boolean;
     isBestSeller?: boolean;
   }): Promise<Product> {
     if (session.role !== "owner") throw new Error("Staff cannot manage products");
     if (productData.pricePaise < 0) throw new Error("Price cannot be negative");
+
+    const hasVariants = Array.isArray(productData.variants) && productData.variants.length > 0;
+    let finalPricePaise = Math.round(productData.pricePaise);
+    if (hasVariants) {
+      const avail = productData.variants!.filter(v => v.isAvailable);
+      const pool = avail.length > 0 ? avail : productData.variants!;
+      finalPricePaise = Math.min(...pool.map(v => v.pricePaise));
+    }
 
     let p: Product;
     if (productData.id) {
@@ -59,11 +71,15 @@ export class CatalogService {
         categoryId: productData.categoryId,
         name: productData.name.trim(),
         description: productData.description.trim(),
-        pricePaise: Math.round(productData.pricePaise),
-        stock: productData.stock !== null ? Math.max(0, Math.floor(productData.stock)) : null,
+        pricePaise: finalPricePaise,
+        stock: hasVariants ? null : (productData.stock !== null ? Math.max(0, Math.floor(productData.stock)) : null),
         isAvailable: productData.isAvailable,
         image: productData.image !== undefined ? productData.image : existing.image,
         images: productData.images !== undefined ? productData.images : existing.images,
+        thumbs: productData.thumbs !== undefined ? productData.thumbs : existing.thumbs,
+        translations: productData.translations !== undefined ? productData.translations : existing.translations,
+        optionNames: productData.optionNames !== undefined ? productData.optionNames : existing.optionNames,
+        variants: productData.variants !== undefined ? productData.variants : existing.variants,
         isFeatured: productData.isFeatured !== undefined ? productData.isFeatured : existing.isFeatured,
         isBestSeller: productData.isBestSeller !== undefined ? productData.isBestSeller : existing.isBestSeller
       };
@@ -74,11 +90,15 @@ export class CatalogService {
         categoryId: productData.categoryId,
         name: productData.name.trim(),
         description: productData.description.trim(),
-        pricePaise: Math.round(productData.pricePaise),
-        stock: productData.stock !== null ? Math.max(0, Math.floor(productData.stock)) : null,
+        pricePaise: finalPricePaise,
+        stock: hasVariants ? null : (productData.stock !== null ? Math.max(0, Math.floor(productData.stock)) : null),
         isAvailable: productData.isAvailable,
         image: productData.image,
         images: productData.images,
+        thumbs: productData.thumbs,
+        translations: productData.translations,
+        optionNames: productData.optionNames,
+        variants: productData.variants,
         isFeatured: productData.isFeatured || false,
         isBestSeller: productData.isBestSeller || false,
         soldCount: 0,

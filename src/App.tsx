@@ -14,22 +14,24 @@ import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { FranchiseSignupPage } from "./pages/FranchiseSignupPage";
-import { ThemesGalleryPage } from "./pages/ThemesGalleryPage";
-import { ThemePreviewPage } from "./pages/ThemePreviewPage";
 import { StorefrontPage } from "./pages/StorefrontPage";
-import { AdminPage } from "./pages/AdminPage";
-import { DiagnosticsPage } from "./pages/DiagnosticsPage";
-
 import { DashboardLayout } from "./pages/dashboard/DashboardLayout";
 import { OverviewTab } from "./pages/dashboard/OverviewTab";
-import { ProductsTab } from "./pages/dashboard/ProductsTab";
-import { CategoriesTab } from "./pages/dashboard/CategoriesTab";
-import { OrdersTab } from "./pages/dashboard/OrdersTab";
-import { QrStandsTab } from "./pages/dashboard/QrStandsTab";
-import { StaffTab } from "./pages/dashboard/StaffTab";
-import { ReportsTab } from "./pages/dashboard/ReportsTab";
-import { SettingsTab } from "./pages/dashboard/SettingsTab";
-import { AiAssistantTab } from "./pages/dashboard/AiAssistantTab";
+
+const ThemesGalleryPage = React.lazy(() => import("./pages/ThemesGalleryPage").then(m => ({ default: m.ThemesGalleryPage })));
+const ThemePreviewPage = React.lazy(() => import("./pages/ThemePreviewPage").then(m => ({ default: m.ThemePreviewPage })));
+const AdminPage = React.lazy(() => import("./pages/AdminPage").then(m => ({ default: m.AdminPage })));
+const DiagnosticsPage = React.lazy(() => import("./pages/DiagnosticsPage").then(m => ({ default: m.DiagnosticsPage })));
+
+const ProductsTab = React.lazy(() => import("./pages/dashboard/ProductsTab").then(m => ({ default: m.ProductsTab })));
+const CategoriesTab = React.lazy(() => import("./pages/dashboard/CategoriesTab").then(m => ({ default: m.CategoriesTab })));
+const OrdersTab = React.lazy(() => import("./pages/dashboard/OrdersTab").then(m => ({ default: m.OrdersTab })));
+const QrStandsTab = React.lazy(() => import("./pages/dashboard/QrStandsTab").then(m => ({ default: m.QrStandsTab })));
+const StaffTab = React.lazy(() => import("./pages/dashboard/StaffTab").then(m => ({ default: m.StaffTab })));
+const ReportsTab = React.lazy(() => import("./pages/dashboard/ReportsTab").then(m => ({ default: m.ReportsTab })));
+const SettingsTab = React.lazy(() => import("./pages/dashboard/SettingsTab").then(m => ({ default: m.SettingsTab })));
+const AiAssistantTab = React.lazy(() => import("./pages/dashboard/AiAssistantTab").then(m => ({ default: m.AiAssistantTab })));
+const StorePageTab = React.lazy(() => import("./pages/dashboard/StorePageTab").then(m => ({ default: m.StorePageTab })));
 
 export default function App() {
   const [currentHash, setCurrentHash] = useState<string>(window.location.hash || "#/");
@@ -183,21 +185,28 @@ export default function App() {
 
   // ROUTE 3: Themes
   if (segments[0] === "themes") {
-    if (segments[1]) {
-      return <ThemePreviewPage themeKey={segments[1]} onNavigate={navigateTo} />;
-    }
-    return <ThemesGalleryPage onNavigate={navigateTo} />;
+    return (
+      <React.Suspense fallback={<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-muted)" }}>Loading theme...</div>}>
+        {segments[1] ? (
+          <ThemePreviewPage themeKey={segments[1]} onNavigate={navigateTo} />
+        ) : (
+          <ThemesGalleryPage onNavigate={navigateTo} />
+        )}
+      </React.Suspense>
+    );
   }
 
   // ROUTE 4: Admin Platform
   if (segments[0] === "admin") {
     return (
-      <AdminPage
-        onNavigate={navigateTo}
-        onSelectStoreSession={(storeId, userId, role) => {
-          handleLoginSuccess({ storeId, userId, role });
-        }}
-      />
+      <React.Suspense fallback={<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-muted)" }}>Loading admin...</div>}>
+        <AdminPage
+          onNavigate={navigateTo}
+          onSelectStoreSession={(storeId, userId, role) => {
+            handleLoginSuccess({ storeId, userId, role });
+          }}
+        />
+      </React.Suspense>
     );
   }
 
@@ -214,7 +223,11 @@ export default function App() {
         </div>
       );
     }
-    return <DiagnosticsPage onNavigate={navigateTo} />;
+    return (
+      <React.Suspense fallback={<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-muted)" }}>Loading diagnostics...</div>}>
+        <DiagnosticsPage onNavigate={navigateTo} />
+      </React.Suspense>
+    );
   }
 
   // ROUTE 6: Storefront (#/store/:slug or #/store/:slug/order/:orderNumber)
@@ -252,6 +265,7 @@ export default function App() {
     else if (subroute === "staff") content = <StaffTab session={session} />;
     else if (subroute === "reports") content = <ReportsTab session={session} />;
     else if (subroute === "settings") content = <SettingsTab session={session} />;
+    else if (subroute === "store-page") content = <StorePageTab session={session} />;
     else if (subroute === "ai-assistant") content = <AiAssistantTab session={session} />;
     else content = <OverviewTab session={session} onNavigate={navigateTo} />;
 
@@ -262,7 +276,9 @@ export default function App() {
         onNavigate={navigateTo}
         onLogout={handleLogout}
       >
-        {content}
+        <React.Suspense fallback={<div style={{ padding: "32px", textAlign: "center", color: "var(--color-muted)" }}>Loading tab...</div>}>
+          {content}
+        </React.Suspense>
       </DashboardLayout>
     );
   }

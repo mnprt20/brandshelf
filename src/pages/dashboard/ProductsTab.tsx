@@ -1,16 +1,135 @@
 import React, { useState, useEffect } from "react";
-import { SessionContext, Product, Category, Store } from "../../types";
+import { SessionContext, Product, Category, Store, Variant, ProductTranslations } from "../../types";
 import { defaultRepository } from "../../repository/storage";
 import { CatalogService } from "../../services/catalogService";
 import { formatPaise, parseRupeesToPaise } from "../../utils/money";
-import { resizeImageToDataUrl, compressDataUrl } from "../../utils/image";
-import { apiEnhancePhoto, EnhancePhotoResult } from "../../services/apiClient";
+import { resizeImageToDataUrl, compressDataUrl, createThumbnail } from "../../utils/image";
+import { apiEnhancePhoto, EnhancePhotoResult, apiBulkImportProducts, apiTranslateProduct } from "../../services/apiClient";
 import {
   PRODUCT_TYPES,
   ProductType,
   PHOTO_STYLE_PRESETS,
   inferProductType
 } from "../../config/photoStyles";
+
+interface VariantRow {
+  id: string;
+  label: string;
+  options: Record<string, string>;
+  priceRupees: string;
+  stockInput: string;
+  isAvailable: boolean;
+}
+
+function generateVariantRows(
+  optionNames: string[],
+  optionValues: Record<string, string[]>,
+  existingRows: VariantRow[],
+  defaultPriceRupees: string
+): VariantRow[] {
+  const activeNames = optionNames.filter(n => n.trim() && (optionValues[n] || []).length > 0);
+  if (activeNames.length === 0) return [];
+
+  let combos: Record<string, string>[] = [{}];
+  for (const name of activeNames) {
+    const vals = optionValues[name] || [];
+    const next: Record<string, string>[] = [];
+    for (const c of combos) {
+      for (const val of vals) {
+        next.push({ ...c, [name]: val });
+      }
+    }
+    combos = next;
+  }
+
+  const cappedCombos = combos.slice(0, 30);
+
+  return cappedCombos.map((combo, idx) => {
+    const label = activeNames.map(n => combo[n]).join(" / ");
+    const existing = existingRows.find(r => {
+      return activeNames.every(n => r.options[n] === combo[n]);
+    });
+
+    if (existing) {
+      return {
+        ...existing,
+        label,
+        options: combo
+      };
+    }
+
+    return {
+      id: `var_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+      label,
+      options: combo,
+      priceRupees: defaultPriceRupees || "",
+      stockInput: "",
+      isAvailable: true
+    };
+  });
+}
+
+function parseCsv(text: string): any[] {
+  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+  if (lines.length <= 1) return [];
+
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ""));
+  const nameIdx = headers.findIndex(h => h === "name" || h === "title");
+  const catIdx = headers.findIndex(h => h === "category" || h === "categoryid");
+  const priceIdx = headers.findIndex(h => h === "price" || h === "pricepaise" || h === "rupees");
+  const stockIdx = headers.findIndex(h => h === "stock" || h === "quantity");
+  const descIdx = headers.findIndex(h => h === "description" || h === "desc");
+  const availIdx = headers.findIndex(h => h === "isavailable" || h === "available");
+  const idIdx = headers.findIndex(h => h === "id" || h === "productid");
+
+  const rows: any[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const cells: string[] = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let c = 0; c < rawLine.length; c++) {
+      const char = rawLine[c];
+      if (char === '"' || char === "'") {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        cells.push(cur.trim());
+        cur = "";
+      } else {
+        cur += char;
+      }
+    }
+    cells.push(cur.trim());
+
+    const name = nameIdx >= 0 ? cells[nameIdx] : cells[0];
+    if (!name) continue;
+
+    let pricePaise = 0;
+    if (priceIdx >= 0 && cells[priceIdx]) {
+      const num = parseFloat(cells[priceIdx].replace(/[^0-9.]/g, ""));
+      if (!isNaN(num)) {
+        pricePaise = Math.round(num * 100);
+      }
+    }
+
+    let stock: number | null = null;
+    if (stockIdx >= 0 && cells[stockIdx] !== "" && cells[stockIdx] !== undefined) {
+      const parsedStock = parseInt(cells[stockIdx], 10);
+      if (!isNaN(parsedStock)) stock = parsedStock;
+    }
+
+    rows.push({
+      id: idIdx >= 0 ? cells[idIdx] || undefined : undefined,
+      name,
+      categoryId: catIdx >= 0 ? cells[catIdx] : undefined,
+      description: descIdx >= 0 ? cells[descIdx] : "",
+      pricePaise,
+      stock,
+      isAvailable: availIdx >= 0 ? cells[availIdx].toLowerCase() !== "false" && cells[availIdx] !== "0" : true
+    });
+  }
+  return rows;
+}
 
 interface Props {
   session: SessionContext;
@@ -36,6 +155,21 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Variants Builder State
+  const [hasVariants, setHasVariants] = useState(false);
+  const [optionNames, setOptionNames] = useState<string[]>(["Size"]);
+  const [optionValues, setOptionValues] = useState<Record<string, string[]>>({ "Size": ["S", "M", "L"] });
+  const [variantRows, setVariantRows] = useState<VariantRow[]>([]);
+  const [chipInputs, setChipInputs] = useState<Record<string, string>>({});
+
+  // Bulk Import State
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkParsedItems, setBulkParsedItems] = useState<any[]>([]);
+  const [bulkFileName, setBulkFileName] = useState("");
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ processed: number; errors: { row: number; name?: string; error: string }[] } | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
   // Studio Photo Modal State
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [studioTargetImage, setStudioTargetImage] = useState<string>("");
@@ -45,6 +179,16 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
   const [studioLoadingMessage, setStudioLoadingMessage] = useState("Setting up studio lights...");
   const [studioResult, setStudioResult] = useState<EnhancePhotoResult | null>(null);
   const [studioError, setStudioError] = useState<string | null>(null);
+
+  // Translation State
+  const [hiName, setHiName] = useState("");
+  const [hiDescription, setHiDescription] = useState("");
+  const [paName, setPaName] = useState("");
+  const [paDescription, setPaDescription] = useState("");
+  const [translating, setTranslating] = useState(false);
+  const [translationQuota, setTranslationQuota] = useState<{ used: number; total: number } | null>(null);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [showTranslationSection, setShowTranslationSection] = useState(false);
 
   const catalogService = new CatalogService(defaultRepository);
 
@@ -60,6 +204,32 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
   useEffect(() => {
     loadData();
   }, [session]);
+
+  const handleTranslateWithAi = async () => {
+    if (!name.trim()) {
+      alert("Please enter a Product Title first to translate.");
+      return;
+    }
+    setTranslating(true);
+    setTranslationError(null);
+    try {
+      const res = await apiTranslateProduct({ name, description });
+      if (res.hi) {
+        setHiName(res.hi.name || "");
+        setHiDescription(res.hi.description || "");
+      }
+      if (res.pa) {
+        setPaName(res.pa.name || "");
+        setPaDescription(res.pa.description || "");
+      }
+      setTranslationQuota({ used: res.quotaUsed, total: res.quotaTotal });
+      setShowTranslationSection(true);
+    } catch (err: any) {
+      setTranslationError(err.message || "Failed to translate product");
+    } finally {
+      setTranslating(false);
+    }
+  };
 
   // Rotate loading message during studio enhancement
   useEffect(() => {
@@ -88,6 +258,17 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
     setIsAvailable(true);
     setImages([]);
     setError(null);
+    setHasVariants(false);
+    setOptionNames(["Size"]);
+    setOptionValues({ "Size": ["S", "M", "L"] });
+    setVariantRows([]);
+    setChipInputs({});
+    setHiName("");
+    setHiDescription("");
+    setPaName("");
+    setPaDescription("");
+    setTranslationError(null);
+    setShowTranslationSection(false);
     setIsModalOpen(true);
   };
 
@@ -102,7 +283,131 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
     const currentImgs = Array.isArray(p.images) && p.images.length > 0 ? [...p.images] : (p.image ? [p.image] : []);
     setImages(currentImgs);
     setError(null);
+    setHiName(p.translations?.hi?.name || "");
+    setHiDescription(p.translations?.hi?.description || "");
+    setPaName(p.translations?.pa?.name || "");
+    setPaDescription(p.translations?.pa?.description || "");
+    setShowTranslationSection(!!(p.translations?.hi || p.translations?.pa));
+    setTranslationError(null);
+
+    const prodHasVariants = Array.isArray(p.variants) && p.variants.length > 0;
+    setHasVariants(prodHasVariants);
+
+    if (prodHasVariants) {
+      const names = p.optionNames && p.optionNames.length > 0 ? p.optionNames : [];
+      const vals: Record<string, string[]> = {};
+      names.forEach(n => { vals[n] = []; });
+      p.variants!.forEach(v => {
+        Object.entries(v.options || {}).forEach(([k, val]) => {
+          if (!vals[k]) vals[k] = [];
+          if (!vals[k].includes(val)) vals[k].push(val);
+        });
+      });
+      const finalNames = names.length > 0 ? names : Object.keys(vals);
+      setOptionNames(finalNames.length > 0 ? finalNames : ["Size"]);
+      setOptionValues(vals);
+      setVariantRows(p.variants!.map(v => ({
+        id: v.id,
+        label: v.label,
+        options: v.options,
+        priceRupees: (v.pricePaise / 100).toString(),
+        stockInput: v.stock !== null && v.stock !== undefined ? v.stock.toString() : "",
+        isAvailable: v.isAvailable
+      })));
+    } else {
+      setOptionNames(["Size"]);
+      setOptionValues({ "Size": ["S", "M", "L"] });
+      setVariantRows([]);
+    }
+    setChipInputs({});
     setIsModalOpen(true);
+  };
+
+  const handleAddChip = (optName: string) => {
+    const rawVal = chipInputs[optName] || "";
+    const cleanVal = rawVal.trim();
+    if (!cleanVal) return;
+    const current = optionValues[optName] || [];
+    if (current.includes(cleanVal)) {
+      setChipInputs(prev => ({ ...prev, [optName]: "" }));
+      return;
+    }
+    const nextVals = { ...optionValues, [optName]: [...current, cleanVal] };
+    setOptionValues(nextVals);
+    setChipInputs(prev => ({ ...prev, [optName]: "" }));
+    setVariantRows(prev => generateVariantRows(optionNames, nextVals, prev, priceRupees));
+  };
+
+  const handleRemoveChip = (optName: string, valToRemove: string) => {
+    const current = optionValues[optName] || [];
+    const filtered = current.filter(v => v !== valToRemove);
+    const nextVals = { ...optionValues, [optName]: filtered };
+    setOptionValues(nextVals);
+    setVariantRows(prev => generateVariantRows(optionNames, nextVals, prev, priceRupees));
+  };
+
+  const handleAddOptionName = () => {
+    if (optionNames.length >= 2) return;
+    const newName = optionNames.includes("Colour") ? "Style" : "Colour";
+    const nextNames = [...optionNames, newName];
+    const nextVals = { ...optionValues, [newName]: [] };
+    setOptionNames(nextNames);
+    setOptionValues(nextVals);
+  };
+
+  const handleRemoveOptionName = (idx: number) => {
+    const toRemove = optionNames[idx];
+    const nextNames = optionNames.filter((_, i) => i !== idx);
+    const nextVals = { ...optionValues };
+    delete nextVals[toRemove];
+    setOptionNames(nextNames);
+    setOptionValues(nextVals);
+    setVariantRows(prev => generateVariantRows(nextNames, nextVals, prev, priceRupees));
+  };
+
+  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkFileName(file.name);
+    setBulkError(null);
+    setBulkResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      try {
+        const rows = parseCsv(text);
+        if (rows.length === 0) {
+          setBulkError("No valid product rows found in the CSV. Make sure you have a header row with name and price.");
+          return;
+        }
+        setBulkParsedItems(rows);
+      } catch (err: any) {
+        setBulkError("Failed to parse CSV: " + err.message);
+      }
+    };
+    reader.onerror = () => {
+      setBulkError("Failed to read file.");
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleRunBulkImport = async () => {
+    if (bulkParsedItems.length === 0) return;
+    setBulkImporting(true);
+    setBulkError(null);
+    setBulkResult(null);
+
+    try {
+      const res = await apiBulkImportProducts(bulkParsedItems);
+      setBulkResult(res);
+      await loadData();
+    } catch (err: any) {
+      setBulkError(err.message || "Failed to import products");
+    } finally {
+      setBulkImporting(false);
+    }
   };
 
   const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -201,20 +506,126 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
     setSaving(true);
 
     try {
-      const pricePaise = parseRupeesToPaise(priceRupees);
-      const stock = stockInput.trim() === "" ? null : parseInt(stockInput.trim(), 10);
+      if (hasVariants) {
+        const activeNames = optionNames.filter(n => n.trim() && (optionValues[n] || []).length > 0);
+        if (activeNames.length === 0) {
+          throw new Error("Please add at least one option name with values (e.g. Size -> S, M, L).");
+        }
+        if (variantRows.length === 0) {
+          throw new Error("No variants generated. Please check your option values.");
+        }
+        if (variantRows.length > 30) {
+          throw new Error("A maximum of 30 variants is allowed per product.");
+        }
 
-      await catalogService.saveProduct(session, {
-        id: editingProduct?.id,
-        categoryId,
-        name,
-        description,
-        pricePaise,
-        stock,
-        isAvailable,
-        image: images[0] || undefined,
-        images: images.length > 0 ? images : undefined
-      });
+        const variants: Variant[] = [];
+        for (const r of variantRows) {
+          if (!r.priceRupees || isNaN(parseFloat(r.priceRupees)) || parseFloat(r.priceRupees) < 0) {
+            throw new Error(`Variant "${r.label}" requires a valid price >= 0.`);
+          }
+          const variantPricePaise = parseRupeesToPaise(r.priceRupees);
+          const variantStock = r.stockInput.trim() === "" ? null : Math.max(0, parseInt(r.stockInput.trim(), 10));
+          variants.push({
+            id: r.id,
+            label: r.label,
+            options: r.options,
+            pricePaise: variantPricePaise,
+            stock: variantStock,
+            isAvailable: r.isAvailable
+          });
+        }
+
+        const avail = variants.filter(v => v.isAvailable);
+        const pool = avail.length > 0 ? avail : variants;
+        const lowestPricePaise = Math.min(...pool.map(v => v.pricePaise));
+
+        // Generate 400px WebP thumbnails for all images
+        const thumbs: string[] = [];
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          try {
+            const t = await createThumbnail(img, 400, 0.75);
+            thumbs.push(t);
+          } catch {
+            thumbs.push(img);
+          }
+        }
+
+        const translations: ProductTranslations = {};
+        if (hiName.trim() || hiDescription.trim()) {
+          translations.hi = {
+            name: hiName.trim() || name,
+            description: hiDescription.trim() || description
+          };
+        }
+        if (paName.trim() || paDescription.trim()) {
+          translations.pa = {
+            name: paName.trim() || name,
+            description: paDescription.trim() || description
+          };
+        }
+
+        await catalogService.saveProduct(session, {
+          id: editingProduct?.id,
+          categoryId,
+          name,
+          description,
+          pricePaise: lowestPricePaise,
+          stock: null,
+          isAvailable,
+          image: images[0] || undefined,
+          images: images.length > 0 ? images : undefined,
+          thumbs: thumbs.length > 0 ? thumbs : undefined,
+          translations: Object.keys(translations).length > 0 ? translations : undefined,
+          optionNames: activeNames,
+          variants
+        });
+      } else {
+        const pricePaise = parseRupeesToPaise(priceRupees);
+        const stock = stockInput.trim() === "" ? null : parseInt(stockInput.trim(), 10);
+
+        // Generate 400px WebP thumbnails for all images
+        const thumbs: string[] = [];
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          try {
+            const t = await createThumbnail(img, 400, 0.75);
+            thumbs.push(t);
+          } catch {
+            thumbs.push(img);
+          }
+        }
+
+        const translations: ProductTranslations = {};
+        if (hiName.trim() || hiDescription.trim()) {
+          translations.hi = {
+            name: hiName.trim() || name,
+            description: hiDescription.trim() || description
+          };
+        }
+        if (paName.trim() || paDescription.trim()) {
+          translations.pa = {
+            name: paName.trim() || name,
+            description: paDescription.trim() || description
+          };
+        }
+
+        await catalogService.saveProduct(session, {
+          id: editingProduct?.id,
+          categoryId,
+          name,
+          description,
+          pricePaise,
+          stock,
+          isAvailable,
+          image: images[0] || undefined,
+          images: images.length > 0 ? images : undefined,
+          thumbs: thumbs.length > 0 ? thumbs : undefined,
+          translations: Object.keys(translations).length > 0 ? translations : undefined,
+          optionNames: undefined,
+          variants: undefined
+        });
+      }
 
       setIsModalOpen(false);
       loadData();
@@ -255,19 +666,33 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
 
   return (
     <div style={{ maxWidth: "1000px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <h1 style={{ fontFamily: "var(--font-headline)", fontSize: "32px", margin: 0 }}>Products & Inventory</h1>
           <p style={{ color: "var(--color-muted)", fontSize: "14px", marginTop: "4px" }}>
             Add, update prices in INR (stored as integer paise), and manage stock.
           </p>
         </div>
-        <button
-          onClick={openAddModal}
-          style={{ padding: "10px 20px", borderRadius: "9999px", background: store?.brandColor || "var(--color-forest)", color: "#FFFFFF", fontWeight: 700, fontSize: "14px", cursor: "pointer" }}
-        >
-          + Add New Product
-        </button>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            onClick={() => {
+              setBulkParsedItems([]);
+              setBulkFileName("");
+              setBulkResult(null);
+              setBulkError(null);
+              setIsBulkModalOpen(true);
+            }}
+            style={{ padding: "10px 18px", borderRadius: "9999px", background: "#FFFFFF", color: store?.brandColor || "var(--color-forest)", border: `1.5px solid ${store?.brandColor || "var(--color-forest)"}`, fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>📄</span> Bulk Import (CSV)
+          </button>
+          <button
+            onClick={openAddModal}
+            style={{ padding: "10px 20px", borderRadius: "9999px", background: store?.brandColor || "var(--color-forest)", color: "#FFFFFF", fontWeight: 700, fontSize: "14px", cursor: "pointer" }}
+          >
+            + Add New Product
+          </button>
+        </div>
       </div>
 
       {/* Filters & Search */}
@@ -318,6 +743,7 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
             <tbody>
               {filtered.map(p => {
                 const coverImg = p.image || (p.images && p.images[0]);
+                const prodHasVariants = Array.isArray(p.variants) && p.variants.length > 0;
                 return (
                   <tr key={p.id} style={{ borderBottom: "1px solid #F0F4EC" }}>
                     <td style={{ padding: "14px 20px" }}>
@@ -340,11 +766,28 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
                     <td style={{ padding: "14px 20px", color: "var(--color-muted)", fontSize: "13px" }}>
                       {categoryMap.get(p.categoryId) || "Uncategorized"}
                     </td>
-                    <td style={{ padding: "14px 20px", fontWeight: 700, color: store?.brandColor }}>
-                      {formatPaise(p.pricePaise)}
+                    <td style={{ padding: "14px 20px" }}>
+                      <div style={{ fontWeight: 700, color: store?.brandColor }}>
+                        {prodHasVariants ? `From ${formatPaise(p.pricePaise)}` : formatPaise(p.pricePaise)}
+                      </div>
+                      {prodHasVariants && (
+                        <span style={{ display: "inline-block", background: "#F0F4EC", color: "#374151", fontSize: "11px", fontWeight: 600, padding: "2px 6px", borderRadius: "4px", marginTop: "3px" }}>
+                          {p.variants!.length} variants
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: "14px 20px" }}>
-                      {p.stock === null ? (
+                      {prodHasVariants ? (
+                        <div>
+                          {p.variants!.some(v => v.stock !== null) ? (
+                            <span style={{ fontWeight: 600, color: "var(--color-ink)", fontSize: "13px" }}>
+                              {p.variants!.reduce((acc, v) => acc + (v.stock || 0), 0)} total
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--color-muted)", fontSize: "12px" }}>Unlimited</span>
+                          )}
+                        </div>
+                      ) : p.stock === null ? (
                         <span style={{ color: "var(--color-muted)", fontSize: "12px" }}>Unlimited</span>
                       ) : (
                         <span style={{ fontWeight: 600, color: p.stock <= 5 ? "#DC2626" : "var(--color-ink)" }}>
@@ -435,26 +878,43 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>
-                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>Price in Rupees (₹)</label>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
+                    {hasVariants ? "Default Base Price (₹)" : "Price in Rupees (₹)"}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
-                    required
+                    required={!hasVariants}
                     value={priceRupees}
-                    onChange={e => setPriceRupees(e.target.value)}
-                    placeholder="e.g. 250"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setPriceRupees(val);
+                      if (hasVariants && variantRows.length > 0) {
+                        setVariantRows(prev => prev.map(r => (!r.priceRupees ? { ...r, priceRupees: val } : r)));
+                      }
+                    }}
+                    placeholder={hasVariants ? "Default for variants" : "e.g. 250"}
                     style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px" }}
                   />
+                  {hasVariants && (
+                    <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>Shows as "From ₹X" on storefront</span>
+                  )}
                 </div>
                 <div>
-                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>Stock (blank = unlimited)</label>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
+                    {hasVariants ? "Stock" : "Stock (blank = unlimited)"}
+                  </label>
                   <input
                     type="number"
-                    value={stockInput}
+                    disabled={hasVariants}
+                    value={hasVariants ? "" : stockInput}
                     onChange={e => setStockInput(e.target.value)}
-                    placeholder="e.g. 15"
-                    style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px" }}
+                    placeholder={hasVariants ? "Set per variant below" : "e.g. 15"}
+                    style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "14px", background: hasVariants ? "#F5F8EF" : "#FFFFFF" }}
                   />
+                  {hasVariants && (
+                    <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>Managed per variant below</span>
+                  )}
                 </div>
               </div>
 
@@ -467,6 +927,339 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
                   placeholder="Notes, ingredients, sizing or materials..."
                   style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #DCE3D6", fontSize: "13px" }}
                 />
+              </div>
+
+              {/* Options & Variants Builder Section */}
+              <div style={{ borderTop: "1px solid #E5EADF", paddingTop: "14px", marginTop: "2px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-ink)" }}>Product Options & Variants</span>
+                    <p style={{ fontSize: "11px", color: "var(--color-muted)", margin: "2px 0 0" }}>
+                      Configure sizes, colours or styles with individual prices and stock (max 30 variants).
+                    </p>
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12px", fontWeight: 700 }}>
+                    <input
+                      type="checkbox"
+                      checked={hasVariants}
+                      onChange={e => {
+                        const next = e.target.checked;
+                        setHasVariants(next);
+                        if (next && variantRows.length === 0) {
+                          const defName = optionNames[0] || "Size";
+                          const defVals = (optionValues[defName] && optionValues[defName].length > 0) ? optionValues[defName] : ["S", "M", "L"];
+                          const nextNames = optionNames.length > 0 ? optionNames : [defName];
+                          const nextVals = { ...optionValues, [defName]: defVals };
+                          setOptionNames(nextNames);
+                          setOptionValues(nextVals);
+                          setVariantRows(generateVariantRows(nextNames, nextVals, [], priceRupees));
+                        }
+                      }}
+                    />
+                    <span>Has Variants</span>
+                  </label>
+                </div>
+
+                {hasVariants && (
+                  <div style={{ marginTop: "12px", background: "#F9FAF7", padding: "14px", borderRadius: "14px", border: "1px solid #E5EADF", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* Option names & chips */}
+                    {optionNames.map((optName, idx) => {
+                      const chips = optionValues[optName] || [];
+                      const curInput = chipInputs[optName] || "";
+                      return (
+                        <div key={idx} style={{ background: "#FFFFFF", padding: "12px", borderRadius: "10px", border: "1px solid #E5EADF" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase" }}>Option {idx + 1}:</span>
+                              <input
+                                value={optName}
+                                placeholder="e.g. Size or Colour"
+                                onChange={e => {
+                                  const newName = e.target.value;
+                                  const nextNames = [...optionNames];
+                                  nextNames[idx] = newName;
+                                  const nextVals = { ...optionValues };
+                                  if (optName !== newName) {
+                                    nextVals[newName] = nextVals[optName] || [];
+                                    delete nextVals[optName];
+                                  }
+                                  setOptionNames(nextNames);
+                                  setOptionValues(nextVals);
+                                  setVariantRows(prev => generateVariantRows(nextNames, nextVals, prev, priceRupees));
+                                }}
+                                style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "12px", fontWeight: 600 }}
+                              />
+                            </div>
+                            {optionNames.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveOptionName(idx)}
+                                style={{ background: "none", color: "#DC2626", fontSize: "11px", fontWeight: 600, border: "none", cursor: "pointer" }}
+                              >
+                                Remove Option
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Chips */}
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+                            {chips.map(val => (
+                              <span
+                                key={val}
+                                style={{
+                                  background: "#F0F4EC",
+                                  color: "var(--color-ink)",
+                                  padding: "4px 8px",
+                                  borderRadius: "9999px",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px"
+                                }}
+                              >
+                                {val}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveChip(optName, val)}
+                                  style={{ background: "none", border: "none", color: "var(--color-muted)", cursor: "pointer", fontSize: "12px", padding: 0 }}
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            ))}
+                            <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                              <input
+                                placeholder="Add value (e.g. S)..."
+                                value={curInput}
+                                onChange={e => setChipInputs(prev => ({ ...prev, [optName]: e.target.value }))}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    handleAddChip(optName);
+                                  }
+                                }}
+                                style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "12px", width: "130px" }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddChip(optName)}
+                                style={{ padding: "4px 8px", borderRadius: "6px", background: "#E5EADF", fontSize: "11px", fontWeight: 600, border: "none", cursor: "pointer" }}
+                              >
+                                + Add
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {optionNames.length < 2 && (
+                      <button
+                        type="button"
+                        onClick={handleAddOptionName}
+                        style={{ alignSelf: "flex-start", padding: "6px 12px", borderRadius: "8px", background: "#FFFFFF", border: "1px dashed #B8C7AE", fontSize: "12px", fontWeight: 600, color: store?.brandColor || "var(--color-forest)", cursor: "pointer" }}
+                      >
+                        + Add 2nd Option (e.g. Colour)
+                      </button>
+                    )}
+
+                    {/* Variant Matrix Table */}
+                    {variantRows.length > 0 && (
+                      <div style={{ marginTop: "8px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "12px", fontWeight: 700 }}>
+                            Variant Matrix ({variantRows.length} of max 30)
+                          </span>
+                          <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
+                            Blank stock = unlimited
+                          </span>
+                        </div>
+
+                        <div style={{ background: "#FFFFFF", borderRadius: "10px", border: "1px solid #E5EADF", overflowX: "auto", maxHeight: "240px" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                            <thead>
+                              <tr style={{ background: "#F5F8EF", borderBottom: "1px solid #E5EADF", color: "var(--color-muted)" }}>
+                                <th style={{ padding: "8px 10px", textAlign: "left" }}>Variant</th>
+                                <th style={{ padding: "8px 10px", textAlign: "left" }}>Price (₹)</th>
+                                <th style={{ padding: "8px 10px", textAlign: "left" }}>Stock</th>
+                                <th style={{ padding: "8px 10px", textAlign: "center" }}>Active</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {variantRows.map((row, rIdx) => (
+                                <tr key={row.id} style={{ borderBottom: "1px solid #F0F4EC" }}>
+                                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{row.label}</td>
+                                  <td style={{ padding: "8px 10px" }}>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      required
+                                      value={row.priceRupees}
+                                      placeholder="Price ₹"
+                                      onChange={e => {
+                                        const val = e.target.value;
+                                        setVariantRows(prev => {
+                                          const next = [...prev];
+                                          next[rIdx] = { ...next[rIdx], priceRupees: val };
+                                          return next;
+                                        });
+                                      }}
+                                      style={{ width: "90px", padding: "4px 6px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "12px" }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: "8px 10px" }}>
+                                    <input
+                                      type="number"
+                                      value={row.stockInput}
+                                      placeholder="Unlimited"
+                                      onChange={e => {
+                                        const val = e.target.value;
+                                        setVariantRows(prev => {
+                                          const next = [...prev];
+                                          next[rIdx] = { ...next[rIdx], stockInput: val };
+                                          return next;
+                                        });
+                                      }}
+                                      style={{ width: "85px", padding: "4px 6px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "12px" }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={row.isAvailable}
+                                      onChange={e => {
+                                        const val = e.target.checked;
+                                        setVariantRows(prev => {
+                                          const next = [...prev];
+                                          next[rIdx] = { ...next[rIdx], isAvailable: val };
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Multilingual Catalogue Section (Hindi & Punjabi) */}
+              <div style={{ borderTop: "1px solid #E5EADF", paddingTop: "14px", marginTop: "2px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-ink)" }}>Multilingual Catalogue (Hindi & Punjabi)</span>
+                    <p style={{ fontSize: "11px", color: "var(--color-muted)", margin: "2px 0 0" }}>
+                      Localize title and description for Hindi & Punjabi regional shoppers.
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={handleTranslateWithAi}
+                      disabled={translating}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "8px",
+                        background: "#EEF8F1",
+                        color: "#166534",
+                        border: "1px solid #BBF7D0",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px"
+                      }}
+                    >
+                      <span>🌐</span> {translating ? "Translating..." : "Translate with AI"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTranslationSection(!showTranslationSection)}
+                      style={{ background: "none", border: "none", fontSize: "11px", color: "var(--color-muted)", cursor: "pointer", textDecoration: "underline" }}
+                    >
+                      {showTranslationSection ? "Hide" : "Edit manually"}
+                    </button>
+                  </div>
+                </div>
+
+                {translationError && (
+                  <div style={{ background: "#FEE2E2", color: "#991B1B", padding: "8px 12px", borderRadius: "8px", fontSize: "12px", marginTop: "8px" }}>
+                    {translationError}
+                  </div>
+                )}
+
+                {translationQuota && (
+                  <div style={{ fontSize: "11px", color: "#166534", marginTop: "6px" }}>
+                    AI Quota used: {translationQuota.used}/{translationQuota.total} today
+                  </div>
+                )}
+
+                {showTranslationSection && (
+                  <div style={{ marginTop: "12px", background: "#F9FAF7", padding: "14px", borderRadius: "14px", border: "1px solid #E5EADF", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* Hindi Section */}
+                    <div style={{ background: "#FFFFFF", padding: "12px", borderRadius: "10px", border: "1px solid #E5EADF" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#B45309", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span>🇮🇳</span> हिन्दी (Hindi)
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <div>
+                          <label style={{ display: "block", fontSize: "11px", color: "var(--color-muted)", marginBottom: "2px" }}>शीर्षक (Title in Hindi)</label>
+                          <input
+                            value={hiName}
+                            onChange={e => setHiName(e.target.value)}
+                            placeholder="उत्पाद का नाम..."
+                            style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "13px" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: "block", fontSize: "11px", color: "var(--color-muted)", marginBottom: "2px" }}>विवरण (Description in Hindi)</label>
+                          <textarea
+                            rows={2}
+                            value={hiDescription}
+                            onChange={e => setHiDescription(e.target.value)}
+                            placeholder="उत्पाद का विवरण..."
+                            style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "12px" }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Punjabi Section */}
+                    <div style={{ background: "#FFFFFF", padding: "12px", borderRadius: "10px", border: "1px solid #E5EADF" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#1D4ED8", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span>🌾</span> ਪੰਜਾਬੀ (Punjabi)
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <div>
+                          <label style={{ display: "block", fontSize: "11px", color: "var(--color-muted)", marginBottom: "2px" }}>ਸਿਰਲੇਖ (Title in Punjabi)</label>
+                          <input
+                            value={paName}
+                            onChange={e => setPaName(e.target.value)}
+                            placeholder="ਉਤਪਾਦ ਦਾ ਨਾਮ..."
+                            style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "13px" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: "block", fontSize: "11px", color: "var(--color-muted)", marginBottom: "2px" }}>ਵੇਰਵਾ (Description in Punjabi)</label>
+                          <textarea
+                            rows={2}
+                            value={paDescription}
+                            onChange={e => setPaDescription(e.target.value)}
+                            placeholder="ਉਤਪਾਦ ਦਾ ਵੇਰਵਾ..."
+                            style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #DCE3D6", fontSize: "12px" }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Product Photos Section */}
@@ -751,6 +1544,116 @@ export const ProductsTab: React.FC<Props> = ({ session }) => {
                 }}
               >
                 Use this photo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk CSV Import Modal */}
+      {isBulkModalOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.6)", padding: "20px" }}>
+          <div style={{ background: "#FFFFFF", borderRadius: "24px", maxWidth: "560px", width: "100%", padding: "28px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+              <div>
+                <h2 style={{ fontSize: "20px", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>📄</span> Bulk Import Products (CSV)
+                </h2>
+                <p style={{ color: "var(--color-muted)", fontSize: "13px", margin: "4px 0 0" }}>
+                  Upload a CSV file with columns: <code>name, category, price, stock, description, isAvailable</code>
+                </p>
+              </div>
+              <button
+                onClick={() => setIsBulkModalOpen(false)}
+                style={{ background: "none", border: "none", fontSize: "20px", color: "var(--color-muted)", cursor: "pointer", padding: "2px" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Format Hint */}
+            <div style={{ background: "#F5F8EF", padding: "12px 16px", borderRadius: "12px", fontSize: "12px", color: "var(--color-ink)", marginBottom: "16px" }}>
+              <div style={{ fontWeight: 700, marginBottom: "4px" }}>Sample CSV Format:</div>
+              <code style={{ fontSize: "11px", display: "block", background: "#FFFFFF", padding: "8px", borderRadius: "6px", border: "1px solid #DCE3D6", overflowX: "auto" }}>
+                name,category,price,stock,description,isAvailable<br />
+                Classic Cotton T-Shirt,Apparel,499,50,Premium crewneck,true<br />
+                Cold Brew Coffee,Beverages,180,,Single origin steep,true
+              </code>
+              <div style={{ fontSize: "11px", color: "var(--color-muted)", marginTop: "6px" }}>
+                Note: Products with variants cannot be modified through bulk import and must be managed in the dashboard.
+              </div>
+            </div>
+
+            {/* File Input */}
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, marginBottom: "6px" }}>Choose CSV File</label>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={handleCsvFileChange}
+                style={{ fontSize: "13px" }}
+              />
+              {bulkFileName && (
+                <div style={{ fontSize: "12px", color: "var(--color-forest)", fontWeight: 600, marginTop: "4px" }}>
+                  Selected: {bulkFileName} ({bulkParsedItems.length} rows parsed)
+                </div>
+              )}
+            </div>
+
+            {/* Error banner */}
+            {bulkError && (
+              <div style={{ background: "#FEE2E2", color: "#991B1B", padding: "10px 14px", borderRadius: "10px", fontSize: "12px", marginBottom: "14px" }}>
+                {bulkError}
+              </div>
+            )}
+
+            {/* Result banner */}
+            {bulkResult && (
+              <div style={{ marginBottom: "16px" }}>
+                <div style={{ background: "#DCFCE7", color: "#166534", padding: "10px 14px", borderRadius: "10px", fontSize: "13px", fontWeight: 600, marginBottom: bulkResult.errors.length > 0 ? "8px" : 0 }}>
+                  ✓ Successfully processed {bulkResult.processed} products!
+                </div>
+                {bulkResult.errors.length > 0 && (
+                  <div style={{ background: "#FEF3C7", color: "#92400E", padding: "10px 14px", borderRadius: "10px", fontSize: "12px" }}>
+                    <div style={{ fontWeight: 700, marginBottom: "4px" }}>
+                      {bulkResult.errors.length} skipped with warnings/errors:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: "16px" }}>
+                      {bulkResult.errors.map((e, idx) => (
+                        <li key={idx}>
+                          Row {e.row}{e.name ? ` (${e.name})` : ""}: {e.error}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
+              <button
+                type="button"
+                disabled={bulkImporting || bulkParsedItems.length === 0}
+                onClick={handleRunBulkImport}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: "9999px",
+                  background: (bulkParsedItems.length > 0 && !bulkImporting) ? (store?.brandColor || "var(--color-forest)") : "#CBD5E1",
+                  color: "#FFFFFF",
+                  fontWeight: 700,
+                  fontSize: "14px",
+                  cursor: (bulkParsedItems.length > 0 && !bulkImporting) ? "pointer" : "not-allowed"
+                }}
+              >
+                {bulkImporting ? "Importing Products..." : `Import ${bulkParsedItems.length > 0 ? `${bulkParsedItems.length} Products` : ""}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsBulkModalOpen(false)}
+                style={{ padding: "12px 20px", borderRadius: "9999px", background: "#F0F4EC", color: "var(--color-ink)", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}
+              >
+                Close
               </button>
             </div>
           </div>

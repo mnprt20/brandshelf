@@ -10,7 +10,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSelectOrderToTrack?: (orderNumber: string) => void;
-  onReorderItems?: (items: { productId: string; quantity: number }[]) => void;
+  onReorderItems?: (items: { productId: string; quantity: number; variantId?: string; variantLabel?: string; note?: string }[]) => void;
   onCustomerLoginRequest?: () => void;
 }
 
@@ -148,7 +148,10 @@ export const OrderHistory: React.FC<Props> = ({
     if (onReorderItems && order.items && order.items.length > 0) {
       const itemsToAdd = order.items.map(it => ({
         productId: it.productId,
-        quantity: it.quantity
+        quantity: it.quantity,
+        variantId: it.variantId,
+        variantLabel: it.variantLabel,
+        note: it.note
       }));
       onReorderItems(itemsToAdd);
       onClose();
@@ -526,13 +529,26 @@ export const OrderHistory: React.FC<Props> = ({
                     <div style={{ margin: "10px 0", background: "#F9FAF6", borderRadius: "12px", padding: "10px 12px" }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         {order.items.map((item, idx) => (
-                          <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-                            <span style={{ color: "var(--color-ink)", fontWeight: 500 }}>
-                              {item.nameSnapshot} <span style={{ color: "var(--color-muted)" }}>× {item.quantity}</span>
-                            </span>
-                            <span style={{ fontWeight: 600, color: "var(--color-ink)" }}>
-                              {formatPaise(item.unitPricePaise * item.quantity)}
-                            </span>
+                          <div key={idx} style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "13px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: "var(--color-ink)", fontWeight: 500 }}>
+                                {item.nameSnapshot}
+                                {item.variantLabel && (
+                                  <span style={{ color: "var(--color-muted)", fontWeight: 500, marginLeft: "4px" }}>
+                                    ({item.variantLabel})
+                                  </span>
+                                )}{" "}
+                                <span style={{ color: "var(--color-muted)" }}>× {item.quantity}</span>
+                              </span>
+                              <span style={{ fontWeight: 600, color: "var(--color-ink)" }}>
+                                {formatPaise(item.unitPricePaise * item.quantity)}
+                              </span>
+                            </div>
+                            {item.note && (
+                              <div style={{ fontSize: "11px", color: "var(--color-muted)", fontStyle: "italic", paddingLeft: "4px" }}>
+                                Note: {item.note}
+                              </div>
+                            )}
                           </div>
                         ))}
                         {order.deliveryFeePaise > 0 && (

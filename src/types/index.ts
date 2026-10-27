@@ -59,6 +59,20 @@ export interface Category {
   sortOrder: number;
 }
 
+export interface Variant {
+  id: string;
+  label: string;
+  options: Record<string, string>;
+  pricePaise: number;
+  stock: number | null;
+  isAvailable: boolean;
+}
+
+export interface ProductTranslations {
+  hi?: { name?: string; description?: string };
+  pa?: { name?: string; description?: string };
+}
+
 export interface Product {
   id: string;
   storeId: string;
@@ -70,11 +84,66 @@ export interface Product {
   isAvailable: boolean;
   image?: string;
   images?: string[];
+  thumbs?: string[];
+  translations?: ProductTranslations;
+  optionNames?: string[];
+  variants?: Variant[];
   isFeatured?: boolean;
   isBestSeller?: boolean;
   soldCount?: number;
   createdByUserId: string;
   createdAt: number;
+}
+
+export interface PolicyItem {
+  enabled?: boolean;
+  text: string;
+}
+
+export interface StoreInfoModule {
+  enabled: boolean;
+  address?: string;
+  mapUrl?: string;
+  phone?: string;
+  whatsapp?: string;
+  hours?: Record<string, { open: string; close: string; closed: boolean }>;
+  holidays?: Array<{ date: string; label?: string } | string>;
+  socials?: { instagram?: string; facebook?: string; youtube?: string; website?: string; twitter?: string };
+  gstin?: string;
+  fssai?: string;
+}
+
+export interface StorePoliciesModule {
+  enabled: boolean;
+  returns?: string | PolicyItem;
+  shipping?: string | PolicyItem;
+  privacy?: string | PolicyItem;
+}
+
+export interface StoreAnnouncementModule {
+  enabled: boolean;
+  text: string;
+  tone: "info" | "offer" | "warning";
+  startsAt?: number | string;
+  endsAt?: number | string;
+}
+
+export interface StoreStoryModule {
+  enabled: boolean;
+  ownerPhoto?: string;
+  about?: string;
+  certs?: Array<{ label: string; number?: string } | string>;
+  certifications?: Array<{ label: string; number?: string } | string>;
+}
+
+export interface StoreProfile {
+  id?: string;
+  storeId?: string;
+  info?: StoreInfoModule;
+  policies?: StorePoliciesModule;
+  announcement?: StoreAnnouncementModule;
+  story?: StoreStoryModule;
+  updatedAt?: number;
 }
 
 export interface Customer {
@@ -104,6 +173,8 @@ export interface OrderItemSnapshot {
   unitPricePaise: number;
   quantity: number;
   note?: string;
+  variantId?: string;
+  variantLabel?: string;
 }
 
 export interface Order {

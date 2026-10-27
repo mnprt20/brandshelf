@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Product } from "../types";
+import { Product, Variant } from "../types";
 
 export interface CartLine {
   lineId: string;
   productId: string;
-  variantId: null;
+  variantId: string | null;
+  variantLabel?: string;
   qty: number;
   note?: string;
 }
@@ -17,9 +18,13 @@ export interface StoredCart {
 
 export interface EnrichedCartItem {
   lineId: string;
+  productId: string;
   product: Product;
+  variantId: string | null;
+  variantLabel?: string;
   quantity: number;
   note?: string;
+  unitPricePaise: number;
   lineTotalPaise: number;
 }
 
@@ -117,24 +122,65 @@ export function useCart(storeId: string, products: Product[] = []) {
         continue;
       }
 
-      if (prod.stock !== null && prod.stock !== undefined) {
-        if (prod.stock <= 0) {
+      const hasVariants = Array.isArray(prod.variants) && prod.variants.length > 0;
+
+      if (hasVariants) {
+        if (!line.variantId) {
+          // Product now has variants but line didn't specify one
           modified = true;
           droppedNames.push(prod.name);
           continue;
         }
-        if (line.qty > prod.stock) {
+
+        const v = prod.variants!.find(variant => variant.id === line.variantId);
+        if (!v || !v.isAvailable || (v.stock !== null && v.stock <= 0)) {
           modified = true;
-          adjustedNames.push(`${prod.name} (adjusted to ${prod.stock})`);
+          droppedNames.push(`${prod.name} (${line.variantLabel || v?.label || "Variant"})`);
+          continue;
+        }
+
+        if (v.stock !== null && v.stock !== undefined && line.qty > v.stock) {
+          modified = true;
+          adjustedNames.push(`${prod.name} (${v.label}) (adjusted to ${v.stock})`);
           reconciled.push({
             ...line,
-            qty: prod.stock
+            variantLabel: v.label,
+            qty: v.stock
           });
           continue;
         }
-      }
 
-      reconciled.push(line);
+        // Keep with up-to-date label
+        reconciled.push({
+          ...line,
+          variantLabel: v.label
+        });
+      } else {
+        if (prod.stock !== null && prod.stock !== undefined) {
+          if (prod.stock <= 0) {
+            modified = true;
+            droppedNames.push(prod.name);
+            continue;
+          }
+          if (line.qty > prod.stock) {
+            modified = true;
+            adjustedNames.push(`${prod.name} (adjusted to ${prod.stock})`);
+            reconciled.push({
+              ...line,
+              variantId: null,
+              variantLabel: undefined,
+              qty: prod.stock
+            });
+            continue;
+          }
+        }
+
+        reconciled.push({
+          ...line,
+          variantId: null,
+          variantLabel: undefined
+        });
+      }
     }
 
     if (modified) {
@@ -160,29 +206,46 @@ export function useCart(storeId: string, products: Product[] = []) {
     });
   }, [storeId]);
 
-  const addToCart = useCallback((product: Product, quantity = 1, note?: string) => {
+  const addToCart = useCallback((
+    product: Product,
+    quantity = 1,
+    variantId?: string | null,
+    variantLabel?: string,
+    note?: string
+  ) => {
     updateLines((prev) => {
-      const idx = prev.findIndex((l) => l.productId === product.id);
+      const vId = variantId || null;
+      let targetVariant: Variant | undefined;
+      if (vId && Array.isArray(product.variants)) {
+        targetVariant = product.variants.find(v => v.id === vId);
+      }
+      const label = variantLabel || targetVariant?.label;
+
+      const idx = prev.findIndex((l) => l.productId === product.id && (l.variantId || null) === vId);
+      const maxStock = targetVariant ? targetVariant.stock : product.stock;
+
       if (idx >= 0) {
         const next = [...prev];
         const existing = next[idx];
         const newQty = existing.qty + quantity;
-        const maxStock = product.stock;
         const finalQty = maxStock !== null && maxStock !== undefined ? Math.min(newQty, maxStock) : newQty;
         next[idx] = {
           ...existing,
-          qty: finalQty,
+          variantLabel: label || existing.variantLabel,
+          qty: Math.max(1, finalQty),
           note: note !== undefined ? note : existing.note
         };
         return next;
       }
-      const initialQty = product.stock !== null && product.stock !== undefined ? Math.min(quantity, product.stock) : quantity;
+
+      const initialQty = maxStock !== null && maxStock !== undefined ? Math.min(quantity, maxStock) : quantity;
       return [
         ...prev,
         {
           lineId: "line_" + Math.random().toString(36).substring(2, 9),
           productId: product.id,
-          variantId: null,
+          variantId: vId,
+          variantLabel: label,
           qty: Math.max(1, initialQty),
           note: note?.trim() || undefined
         }
@@ -194,18 +257,31 @@ export function useCart(storeId: string, products: Product[] = []) {
     updateLines((prev) => {
       let current = [...prev];
       for (const prod of prods) {
-        const idx = current.findIndex((l) => l.productId === prod.id);
+        // If product has variants, select the first available variant by default
+        let vId: string | null = null;
+        let vLabel: string | undefined = undefined;
+        let maxStock = prod.stock;
+        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+          const avail = prod.variants.find(v => v.isAvailable && (v.stock === null || v.stock > 0)) || prod.variants[0];
+          if (avail) {
+            vId = avail.id;
+            vLabel = avail.label;
+            maxStock = avail.stock;
+          }
+        }
+
+        const idx = current.findIndex((l) => l.productId === prod.id && (l.variantId || null) === vId);
         if (idx >= 0) {
           const existing = current[idx];
           const newQty = existing.qty + 1;
-          const maxStock = prod.stock;
           const finalQty = maxStock !== null && maxStock !== undefined ? Math.min(newQty, maxStock) : newQty;
-          current[idx] = { ...existing, qty: finalQty };
+          current[idx] = { ...existing, qty: Math.max(1, finalQty) };
         } else {
           current.push({
             lineId: "line_" + Math.random().toString(36).substring(2, 9),
             productId: prod.id,
-            variantId: null,
+            variantId: vId,
+            variantLabel: vLabel,
             qty: 1
           });
         }
@@ -214,11 +290,12 @@ export function useCart(storeId: string, products: Product[] = []) {
     });
   }, [updateLines]);
 
-  const updateCartQty = useCallback((productId: string, delta: number) => {
+  const updateCartQty = useCallback((lineIdOrProductId: string, delta: number, variantId?: string | null) => {
     updateLines((prev) => {
       return prev
         .map((line) => {
-          if (line.productId === productId) {
+          const match = line.lineId === lineIdOrProductId || (line.productId === lineIdOrProductId && (variantId === undefined || (line.variantId || null) === (variantId || null)));
+          if (match) {
             const nextQty = line.qty + delta;
             if (nextQty <= 0) return null;
             return { ...line, qty: nextQty };
@@ -229,10 +306,11 @@ export function useCart(storeId: string, products: Product[] = []) {
     });
   }, [updateLines]);
 
-  const updateLineNote = useCallback((productId: string, note: string) => {
+  const updateLineNote = useCallback((lineIdOrProductId: string, note: string, variantId?: string | null) => {
     updateLines((prev) => {
       return prev.map((line) => {
-        if (line.productId === productId) {
+        const match = line.lineId === lineIdOrProductId || (line.productId === lineIdOrProductId && (variantId === undefined || (line.variantId || null) === (variantId || null)));
+        if (match) {
           const clean = note.slice(0, 140);
           return { ...line, note: clean.trim() ? clean : undefined };
         }
@@ -241,8 +319,12 @@ export function useCart(storeId: string, products: Product[] = []) {
     });
   }, [updateLines]);
 
-  const removeFromCart = useCallback((productId: string) => {
-    updateLines((prev) => prev.filter((l) => l.productId !== productId));
+  const removeFromCart = useCallback((lineIdOrProductId: string, variantId?: string | null) => {
+    updateLines((prev) => prev.filter((l) => {
+      if (l.lineId === lineIdOrProductId) return false;
+      if (l.productId === lineIdOrProductId && (variantId === undefined || (l.variantId || null) === (variantId || null))) return false;
+      return true;
+    }));
   }, [updateLines]);
 
   const clearCart = useCallback(() => {
@@ -251,7 +333,7 @@ export function useCart(storeId: string, products: Product[] = []) {
   }, [updateLines]);
 
   // Rebuild cart for reorder
-  const rebuildCart = useCallback((items: { productId: string; quantity: number; note?: string }[]) => {
+  const rebuildCart = useCallback((items: { productId: string; quantity: number; variantId?: string; variantLabel?: string; note?: string }[]) => {
     const prodMap = new Map<string, Product>();
     for (const p of products) {
       prodMap.set(p.id, p);
@@ -262,19 +344,45 @@ export function useCart(storeId: string, products: Product[] = []) {
 
     for (const it of items) {
       const prod = prodMap.get(it.productId);
-      if (!prod || !prod.isAvailable || (prod.stock !== null && prod.stock <= 0)) {
+      if (!prod || !prod.isAvailable) {
         skipped.push(prod?.name || "An item");
         continue;
       }
+
+      const hasVariants = Array.isArray(prod.variants) && prod.variants.length > 0;
       let finalQty = it.quantity;
-      if (prod.stock !== null && prod.stock !== undefined) {
-        finalQty = Math.min(finalQty, prod.stock);
+      let vLabel = it.variantLabel;
+
+      if (hasVariants) {
+        if (!it.variantId) {
+          skipped.push(prod.name);
+          continue;
+        }
+        const v = prod.variants!.find(variant => variant.id === it.variantId);
+        if (!v || !v.isAvailable || (v.stock !== null && v.stock <= 0)) {
+          skipped.push(`${prod.name} (${it.variantLabel || v?.label || "Variant"})`);
+          continue;
+        }
+        vLabel = v.label;
+        if (v.stock !== null && v.stock !== undefined) {
+          finalQty = Math.min(finalQty, v.stock);
+        }
+      } else {
+        if (prod.stock !== null && prod.stock <= 0) {
+          skipped.push(prod.name);
+          continue;
+        }
+        if (prod.stock !== null && prod.stock !== undefined) {
+          finalQty = Math.min(finalQty, prod.stock);
+        }
       }
+
       if (finalQty > 0) {
         newLines.push({
           lineId: "line_" + Math.random().toString(36).substring(2, 9),
           productId: prod.id,
-          variantId: null,
+          variantId: it.variantId || null,
+          variantLabel: vLabel,
           qty: finalQty,
           note: it.note ? it.note.slice(0, 140) : undefined
         });
@@ -290,7 +398,7 @@ export function useCart(storeId: string, products: Product[] = []) {
     return { successCount: newLines.length, skippedCount: skipped.length };
   }, [products, updateLines]);
 
-  // Enriched Cart Items using live product data
+  // Enriched Cart Items using live product and variant data
   const enrichedItems: EnrichedCartItem[] = useMemo(() => {
     const prodMap = new Map<string, Product>();
     for (const p of products) {
@@ -301,12 +409,27 @@ export function useCart(storeId: string, products: Product[] = []) {
     for (const line of lines) {
       const p = prodMap.get(line.productId);
       if (p) {
+        let unitPrice = p.pricePaise;
+        let vLabel = line.variantLabel;
+
+        if (line.variantId && Array.isArray(p.variants)) {
+          const v = p.variants.find(variant => variant.id === line.variantId);
+          if (v) {
+            unitPrice = v.pricePaise;
+            vLabel = v.label;
+          }
+        }
+
         items.push({
           lineId: line.lineId,
+          productId: line.productId,
           product: p,
+          variantId: line.variantId,
+          variantLabel: vLabel,
           quantity: line.qty,
           note: line.note,
-          lineTotalPaise: p.pricePaise * line.qty
+          unitPricePaise: unitPrice,
+          lineTotalPaise: unitPrice * line.qty
         });
       }
     }

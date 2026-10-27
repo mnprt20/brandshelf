@@ -207,6 +207,24 @@ export const DashboardLayout: React.FC<Props> = ({ session, currentSubroute, onN
             <span>⚙️</span> Shop Settings
           </button>
           <button
+            onClick={() => handleNavClick("#/dashboard/store-page")}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "12px 14px",
+              borderRadius: "12px",
+              background: currentSubroute === "store-page" ? "var(--color-mint)" : "none",
+              color: "var(--color-ink)",
+              fontWeight: 600,
+              fontSize: "14px",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px"
+            }}
+          >
+            <span>🏪</span> Store Page
+          </button>
+          <button
             onClick={() => handleNavClick("#/dashboard/plans")}
             style={{
               width: "100%",

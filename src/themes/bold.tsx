@@ -79,47 +79,76 @@ export const BoldTheme: React.FC<ThemeSharedProps> = ({
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "28px" }}>
-            {filtered.map(p => (
-              <div
-                key={p.id}
-                onClick={() => onSelectProduct?.(p)}
-                style={{
-                  background: "#162016",
-                  borderRadius: "24px",
-                  overflow: "hidden",
-                  border: "1px solid #223322",
-                  display: "flex",
-                  flexDirection: "column",
-                  cursor: onSelectProduct ? "pointer" : "default"
-                }}
-              >
-                <div style={{ height: "200px", background: "#1E2B1E", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {p.image ? (
-                    <img src={p.image} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : (
-                    <span style={{ fontSize: "54px" }}>⚡</span>
-                  )}
-                </div>
+            {filtered.map((p, idx) => {
+              const displayImg = p.thumbs?.[0] || p.images?.[0] || p.image;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => onSelectProduct?.(p)}
+                  style={{
+                    background: "#162016",
+                    borderRadius: "24px",
+                    overflow: "hidden",
+                    border: "1px solid #223322",
+                    display: "flex",
+                    flexDirection: "column",
+                    cursor: onSelectProduct ? "pointer" : "default"
+                  }}
+                >
+                  <div style={{ height: "200px", background: "#1E2B1E", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {displayImg ? (
+                      <img
+                        src={displayImg}
+                        alt={p.name}
+                        loading={idx < 4 ? "eager" : "lazy"}
+                        decoding="async"
+                        width={320}
+                        height={200}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", aspectRatio: "16/10" }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: "54px" }}>⚡</span>
+                    )}
+                  </div>
                 <div style={{ padding: "24px", flex: 1, display: "flex", flexDirection: "column" }}>
                   <h3 style={{ fontSize: "20px", fontWeight: 800, margin: "0 0 8px" }}>{p.name}</h3>
                   <p style={{ fontSize: "14px", color: "#9DB29D", margin: "0 0 16px", flex: 1 }}>{p.description}</p>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "22px", fontWeight: 900, color: "#9EE493" }}>{formatPaise(p.pricePaise)}</span>
-                    <button
-                      disabled={isDemo || (p.stock !== null && p.stock <= 0)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddToCart(p);
-                      }}
-                      style={{ background: "#9EE493", color: "#0C120C", padding: "12px 20px", borderRadius: "14px", fontWeight: 800, fontSize: "14px", border: "none", cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
-                    >
-                      {p.stock !== null && p.stock <= 0 ? "SOLD OUT" : "GRAB IT"}
-                    </button>
+                    <span style={{ fontSize: "22px", fontWeight: 900, color: "#9EE493" }}>
+                      {Array.isArray(p.variants) && p.variants.length > 0
+                        ? `From ${formatPaise(p.pricePaise)}`
+                        : formatPaise(p.pricePaise)}
+                    </span>
+                    {Array.isArray(p.variants) && p.variants.length > 0 ? (
+                      <button
+                        disabled={isDemo}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectProduct) onSelectProduct(p);
+                          else onAddToCart(p);
+                        }}
+                        style={{ background: "#9EE493", color: "#0C120C", padding: "12px 20px", borderRadius: "14px", fontWeight: 800, fontSize: "14px", border: "none", cursor: isDemo ? "not-allowed" : "pointer" }}
+                      >
+                        SELECT
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isDemo || (p.stock !== null && p.stock <= 0)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddToCart(p);
+                        }}
+                        style={{ background: "#9EE493", color: "#0C120C", padding: "12px 20px", borderRadius: "14px", fontWeight: 800, fontSize: "14px", border: "none", cursor: (isDemo || (p.stock !== null && p.stock <= 0)) ? "not-allowed" : "pointer", opacity: (isDemo || (p.stock !== null && p.stock <= 0)) ? 0.6 : 1 }}
+                      >
+                        {p.stock !== null && p.stock <= 0 ? "SOLD OUT" : "GRAB IT"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
         )}
       </main>
     </div>
